@@ -1,0 +1,47 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_uuid": "sample-001",
+        "local_government_cd": "01231",
+        "land_type": "200",
+        "area": 10000,
+        "issue_year": "2024"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[141.572, 42.917], [141.574, 42.917], [141.574, 42.919], [141.572, 42.919], [141.572, 42.917]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_uuid": "sample-002",
+        "local_government_cd": "01231",
+        "land_type": "200",
+        "area": 15000,
+        "issue_year": "2024"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[141.575, 42.917], [141.578, 42.917], [141.578, 42.920], [141.575, 42.920], [141.575, 42.917]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_uuid": "sample-003",
+        "local_government_cd": "01231",
+        "land_type": "100",
+        "area": 20000,
+        "issue_year": "2024"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[141.570, 42.920], [141.576, 42.920], [141.576, 42.923], [141.570, 42.923], [141.570, 42.920]]]
+      }
+    }
+  ]
+}

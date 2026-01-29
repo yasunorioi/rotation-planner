@@ -1,0 +1,156 @@
+"""
+rotation_planner.common - 共通モジュール
+
+認証、DBアクセス、データ移行など、全モジュールで共有する機能。
+
+サブモジュール:
+    - auth: 認証・認可（Gradio auth、ロールベースアクセス制御）
+    - db: データベース接続ユーティリティ
+    - db_access: DBアクセス層（SQLite、Repository パターン）
+    - models: データモデル定義
+    - export: CSVエクスポート
+
+Usage:
+    from rotation_planner.common import (
+        authenticate,
+        get_user_info,
+        FieldRepository,
+        UserRepository,
+        get_db,
+    )
+
+    # 認証
+    if authenticate(username, password):
+        user = get_user_info(username)
+
+    # DB操作
+    with get_db() as conn:
+        fields = FieldRepository.get_fields(user_id=1)
+"""
+
+# ロール定数
+ROLE_ADMIN = "admin"
+ROLE_JA_STAFF = "ja_staff"
+ROLE_FARMER = "farmer"
+ADMIN_ROLES = {ROLE_ADMIN, ROLE_JA_STAFF}
+
+# 認証モジュール
+from rotation_planner.common.auth import (
+    authenticate,
+    get_user_info,
+    get_user_role,
+    is_admin_role,
+    can_access_farmer,
+    get_accessible_farmers,
+    add_user,
+    update_password,
+    delete_user,
+    load_users,
+    save_users,
+    hash_password,
+)
+
+# DB接続モジュール
+from rotation_planner.common.db import (
+    get_db,
+    get_connection,
+    row_to_dict,
+    rows_to_list,
+    DB_PATH,
+    DB_DIR,
+    init_db,
+    check_db_exists,
+    get_db_info,
+)
+
+# DBアクセス層（リポジトリ）
+from rotation_planner.common.db_access import (
+    FieldRepository,
+    CropHistoryRepository,
+    PlanRepository,
+    UserRepository,
+    JAStaffRepository,
+    PesticideMasterRepository,
+    MigrationUtils,
+)
+
+# モデル
+from rotation_planner.common.models import (
+    User,
+    Field,
+    RotationPlan,
+    PlanDetail,
+    CropHistory,
+    PesticideMaster,
+    PesticideOrder,
+    Role,
+)
+
+# エクスポート
+from rotation_planner.common.export import (
+    export_rotation_plan_csv,
+    export_all_plans_csv,
+    export_pesticide_order_csv,
+    export_ja_aggregate_pesticide_csv,
+    export_fields_csv,
+    create_csv_export_ui,
+    can_access_all_data,
+    get_accessible_user_ids,
+)
+
+__all__ = [
+    # ロール定数
+    "ROLE_ADMIN",
+    "ROLE_JA_STAFF",
+    "ROLE_FARMER",
+    "ADMIN_ROLES",
+    # 認証
+    "authenticate",
+    "get_user_info",
+    "get_user_role",
+    "is_admin_role",
+    "can_access_farmer",
+    "get_accessible_farmers",
+    "add_user",
+    "update_password",
+    "delete_user",
+    "load_users",
+    "save_users",
+    "hash_password",
+    # DB接続
+    "get_db",
+    "get_connection",
+    "row_to_dict",
+    "rows_to_list",
+    "DB_PATH",
+    "DB_DIR",
+    "init_db",
+    "check_db_exists",
+    "get_db_info",
+    # リポジトリ
+    "FieldRepository",
+    "CropHistoryRepository",
+    "PlanRepository",
+    "UserRepository",
+    "JAStaffRepository",
+    "PesticideMasterRepository",
+    "MigrationUtils",
+    # モデル
+    "User",
+    "Field",
+    "RotationPlan",
+    "PlanDetail",
+    "CropHistory",
+    "PesticideMaster",
+    "PesticideOrder",
+    "Role",
+    # エクスポート
+    "export_rotation_plan_csv",
+    "export_all_plans_csv",
+    "export_pesticide_order_csv",
+    "export_ja_aggregate_pesticide_csv",
+    "export_fields_csv",
+    "create_csv_export_ui",
+    "can_access_all_data",
+    "get_accessible_user_ids",
+]

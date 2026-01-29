@@ -1,435 +1,48 @@
 """
-ほ場登録アプリ - Gradio + Leaflet.js（複数農家対応版）
-地図上でポリゴンを描画してほ場を登録し、CSV出力する
-認証機能付き・DB連携版
+ほ場登録アプリ - Gradio + Leaflet.js（後方互換性用ラッパー）
+
+このファイルは後方互換性のために残されています。
+新規コードでは rotation_planner.field を使用してください。
+
+スタンドアロン起動: python field_register.py
+ポート: 7862
 """
 
 import gradio as gr
 import pandas as pd
-import json
-import os
-import requests
-from typing import List, Dict, Optional, Tuple, Any
-from dataclasses import dataclass, asdict
-from shapely.geometry import Polygon
-from pyproj import Geod
 
 # 認証・DBモジュール
-from auth import authenticate, get_user_info, get_user_role, is_admin_role
+from auth import authenticate, get_user_info
 from db_access import FieldRepository, CropHistoryRepository, UserRepository
 
-os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
-
-# =============================================================================
-# 定数
-# =============================================================================
-
-# 北海道の初期位置（札幌付近）
-DEFAULT_LAT = 43.06
-DEFAULT_LNG = 141.35
-DEFAULT_ZOOM = 12
-
-# Nominatim API エンドポイント
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
-
-# =============================================================================
-# 面積計算
-# =============================================================================
-
-def calculate_area_from_coords(coordinates: List[List[float]]) -> float:
-    """
-    座標リストから面積を計算（平方メートル）
-    WGS84楕円体上の面積を正確に計算
-    """
-    if len(coordinates) < 3:
-        return 0.0
-
-    # 座標を (lng, lat) 形式に変換（Shapelyは経度,緯度の順）
-    coords_lnglat = [(coord[1], coord[0]) for coord in coordinates]
-
-    # ポリゴンを閉じる
-    if coords_lnglat[0] != coords_lnglat[-1]:
-        coords_lnglat.append(coords_lnglat[0])
-
-    # Geod（測地線計算）を使用して面積を計算
-    geod = Geod(ellps="WGS84")
-
-    # polygon_area_perimeter は (面積, 周長) を返す
-    # 面積は符号付きで返されるので abs() を使用
-    lons = [c[0] for c in coords_lnglat]
-    lats = [c[1] for c in coords_lnglat]
-    area_m2, _ = geod.polygon_area_perimeter(lons, lats)
-
-    return abs(area_m2)
-
-
-def m2_to_a(m2: float) -> float:
-    """平方メートルをアールに変換"""
-    return m2 / 100.0
-
-
-def m2_to_ha(m2: float) -> float:
-    """平方メートルをヘクタールに変換"""
-    return m2 / 10000.0
+# 新モジュールから全てインポート
+from rotation_planner.field import (
+    # 定数
+    DEFAULT_LAT,
+    DEFAULT_LNG,
+    DEFAULT_ZOOM,
+    NOMINATIM_URL,
+    # 面積計算
+    calculate_area_from_coords,
+    m2_to_a,
+    m2_to_ha,
+    # 住所検索
+    search_address,
+    # 地図生成
+    generate_map_html,
+    # ヘルパー
+    get_user_id_from_username,
+    # データ取得
+    get_user_fields,
+    fields_to_dataframe,
+    get_fields_json_for_map,
+    # UI
+    search_and_move_map,
+)
 
 
 # =============================================================================
-# 住所検索
-# =============================================================================
-
-def search_address(query: str) -> Tuple[Optional[float], Optional[float], str]:
-    """
-    住所・地名からNominatim APIで座標を検索
-    Returns: (lat, lng, message)
-    """
-    if not query.strip():
-        return None, None, "検索語を入力してください"
-
-    try:
-        params = {
-            "q": query,
-            "format": "json",
-            "limit": 1,
-            "countrycodes": "jp",  # 日本に限定
-        }
-        headers = {
-            "User-Agent": "FieldRegisterApp/1.0"  # Nominatim利用規約に準拠
-        }
-
-        response = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        results = response.json()
-
-        if results:
-            lat = float(results[0]["lat"])
-            lng = float(results[0]["lon"])
-            display_name = results[0].get("display_name", query)
-            return lat, lng, f"検索結果: {display_name}"
-        else:
-            return None, None, f"「{query}」の検索結果が見つかりません"
-
-    except requests.exceptions.Timeout:
-        return None, None, "検索がタイムアウトしました"
-    except requests.exceptions.RequestException as e:
-        return None, None, f"検索エラー: {str(e)}"
-    except Exception as e:
-        return None, None, f"予期しないエラー: {str(e)}"
-
-
-# =============================================================================
-# ユーザーID取得ヘルパー
-# =============================================================================
-
-def get_user_id_from_username(username: str) -> Optional[int]:
-    """ユーザー名からユーザーIDを取得"""
-    user = UserRepository.get_user_by_username(username)
-    if user:
-        return user.get('id')
-    return None
-
-
-# =============================================================================
-# Leaflet HTML/JS 生成
-# =============================================================================
-
-def generate_map_html(
-    center_lat: float = DEFAULT_LAT,
-    center_lng: float = DEFAULT_LNG,
-    zoom: int = DEFAULT_ZOOM,
-    existing_fields: List[Dict[str, Any]] = None
-) -> str:
-    """Leaflet地図のHTMLを生成"""
-
-    existing_fields = existing_fields or []
-
-    # 既存ほ場のポリゴンデータをJSON形式で埋め込む
-    fields_json = json.dumps([
-        {
-            "field_id": f.get("field_code", f.get("id", "")),
-            "name": f.get("name", ""),
-            "coordinates": json.loads(f.get("coordinates_json", "[]")) if isinstance(f.get("coordinates_json"), str) else f.get("coordinates_json", []),
-            "area_a": f.get("area_a", f.get("area_ha", 0) * 100)
-        }
-        for f in existing_fields
-        if f.get("coordinates_json")
-    ])
-
-    html = f'''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-        <style>
-            #map {{
-                width: 100%;
-                height: 500px;
-                border: 2px solid #ccc;
-                border-radius: 8px;
-            }}
-            .area-display {{
-                background: white;
-                padding: 10px;
-                border-radius: 5px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            }}
-            .field-popup {{
-                min-width: 150px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div id="map"></div>
-
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-        <script>
-            // 地図初期化
-            var map = L.map('map').setView([{center_lat}, {center_lng}], {zoom});
-
-            // OpenStreetMap タイルレイヤー
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                maxZoom: 19
-            }}).addTo(map);
-
-            // 描画レイヤー
-            var drawnItems = new L.FeatureGroup();
-            map.addLayer(drawnItems);
-
-            // 既存ほ場レイヤー
-            var existingFields = new L.FeatureGroup();
-            map.addLayer(existingFields);
-
-            // 描画コントロール
-            var drawControl = new L.Control.Draw({{
-                position: 'topright',
-                draw: {{
-                    polygon: {{
-                        allowIntersection: false,
-                        showArea: true,
-                        shapeOptions: {{
-                            color: '#3388ff',
-                            fillColor: '#3388ff',
-                            fillOpacity: 0.3
-                        }}
-                    }},
-                    polyline: false,
-                    circle: false,
-                    rectangle: false,
-                    marker: false,
-                    circlemarker: false
-                }},
-                edit: {{
-                    featureGroup: drawnItems,
-                    remove: true,
-                    edit: true
-                }}
-            }});
-            map.addControl(drawControl);
-
-            // 面積表示コントロール
-            var areaInfo = L.control({{position: 'bottomright'}});
-            areaInfo.onAdd = function(map) {{
-                this._div = L.DomUtil.create('div', 'area-display');
-                this.update();
-                return this._div;
-            }};
-            areaInfo.update = function(area_m2) {{
-                if (area_m2) {{
-                    var area_a = (area_m2 / 100).toFixed(2);
-                    var area_ha = (area_m2 / 10000).toFixed(4);
-                    this._div.innerHTML = '<b>描画中の面積</b><br>' +
-                        area_a + ' a<br>' +
-                        area_ha + ' ha';
-                }} else {{
-                    this._div.innerHTML = '<b>面積</b><br>ポリゴンを描画してください';
-                }}
-            }};
-            areaInfo.addTo(map);
-
-            // 現在描画中のポリゴン座標
-            var currentPolygonCoords = null;
-
-            // ポリゴン作成完了イベント
-            map.on(L.Draw.Event.CREATED, function(event) {{
-                var layer = event.layer;
-                drawnItems.clearLayers();  // 1つだけ描画可能
-                drawnItems.addLayer(layer);
-
-                // 座標を取得
-                var latlngs = layer.getLatLngs()[0];
-                currentPolygonCoords = latlngs.map(function(ll) {{
-                    return [ll.lat, ll.lng];
-                }});
-
-                // 面積計算（クライアント側の概算）
-                var area_m2 = L.GeometryUtil.geodesicArea(latlngs);
-                areaInfo.update(area_m2);
-
-                // Gradioに座標を送信
-                sendCoordinatesToGradio(currentPolygonCoords);
-            }});
-
-            // ポリゴン編集完了イベント
-            map.on(L.Draw.Event.EDITED, function(event) {{
-                var layers = event.layers;
-                layers.eachLayer(function(layer) {{
-                    var latlngs = layer.getLatLngs()[0];
-                    currentPolygonCoords = latlngs.map(function(ll) {{
-                        return [ll.lat, ll.lng];
-                    }});
-
-                    var area_m2 = L.GeometryUtil.geodesicArea(latlngs);
-                    areaInfo.update(area_m2);
-
-                    sendCoordinatesToGradio(currentPolygonCoords);
-                }});
-            }});
-
-            // ポリゴン削除イベント
-            map.on(L.Draw.Event.DELETED, function(event) {{
-                currentPolygonCoords = null;
-                areaInfo.update(null);
-                sendCoordinatesToGradio(null);
-            }});
-
-            // Gradioへ座標送信
-            function sendCoordinatesToGradio(coords) {{
-                var coordsJson = coords ? JSON.stringify(coords) : '';
-
-                // Gradioのhidden textboxに値を設定
-                var event = new CustomEvent('polygon_update', {{
-                    detail: {{ coordinates: coordsJson }}
-                }});
-                document.dispatchEvent(event);
-
-                // 親ウィンドウにも送信（iframe対応）
-                if (window.parent) {{
-                    window.parent.postMessage({{
-                        type: 'polygon_coordinates',
-                        coordinates: coordsJson
-                    }}, '*');
-                }}
-            }}
-
-            // 既存ほ場を表示
-            var existingData = {fields_json};
-            existingData.forEach(function(field) {{
-                if (field.coordinates && field.coordinates.length > 0) {{
-                    var polygon = L.polygon(field.coordinates, {{
-                        color: '#28a745',
-                        fillColor: '#28a745',
-                        fillOpacity: 0.3
-                    }}).addTo(existingFields);
-
-                    polygon.bindPopup(
-                        '<div class="field-popup">' +
-                        '<b>' + field.field_id + '</b><br>' +
-                        field.name + '<br>' +
-                        field.area_a.toFixed(2) + ' a' +
-                        '</div>'
-                    );
-                }}
-            }});
-
-            // 地図の中心移動関数（外部から呼び出し用）
-            window.moveMapTo = function(lat, lng, zoom) {{
-                map.setView([lat, lng], zoom || 15);
-            }};
-
-            // 現在の座標を取得する関数
-            window.getCurrentCoords = function() {{
-                return currentPolygonCoords ? JSON.stringify(currentPolygonCoords) : '';
-            }};
-
-            // ポリゴンをクリアする関数
-            window.clearDrawnPolygon = function() {{
-                drawnItems.clearLayers();
-                currentPolygonCoords = null;
-                areaInfo.update(null);
-            }};
-
-            // 既存ほ場を更新する関数
-            window.updateExistingFields = function(fieldsData) {{
-                existingFields.clearLayers();
-                var fields = JSON.parse(fieldsData);
-                fields.forEach(function(field) {{
-                    if (field.coordinates && field.coordinates.length > 0) {{
-                        var polygon = L.polygon(field.coordinates, {{
-                            color: '#28a745',
-                            fillColor: '#28a745',
-                            fillOpacity: 0.3
-                        }}).addTo(existingFields);
-
-                        polygon.bindPopup(
-                            '<div class="field-popup">' +
-                            '<b>' + field.field_id + '</b><br>' +
-                            field.name + '<br>' +
-                            field.area_a.toFixed(2) + ' a' +
-                            '</div>'
-                        );
-                    }}
-                }});
-            }};
-        </script>
-    </body>
-    </html>
-    '''
-
-    return html
-
-
-# =============================================================================
-# DBからほ場一覧取得
-# =============================================================================
-
-def get_user_fields(user_id: int) -> List[Dict[str, Any]]:
-    """ユーザーのほ場一覧をDBから取得"""
-    return FieldRepository.get_fields(user_id)
-
-
-def fields_to_dataframe(fields: List[Dict[str, Any]]) -> pd.DataFrame:
-    """ほ場リストをDataFrameに変換"""
-    if not fields:
-        return pd.DataFrame(columns=["ID", "ほ場ID", "地区", "ほ場名", "面積(ha)", "面積(a)", "禁止"])
-
-    rows = []
-    for f in fields:
-        area_ha = f.get("area_ha", 0)
-        area_a = f.get("area_a", area_ha * 100)
-        rows.append({
-            "ID": f.get("id", ""),
-            "ほ場ID": f.get("field_code", ""),
-            "地区": f.get("district", ""),
-            "ほ場名": f.get("name", ""),
-            "面積(ha)": f"{area_ha:.4f}",
-            "面積(a)": f"{area_a:.2f}",
-            "禁止": "Yes" if f.get("beet_forbidden") else "No"
-        })
-    return pd.DataFrame(rows)
-
-
-def get_fields_json_for_map(fields: List[Dict[str, Any]]) -> str:
-    """地図表示用JSONを取得"""
-    return json.dumps([
-        {
-            "field_id": f.get("field_code", f.get("id", "")),
-            "name": f.get("name", ""),
-            "coordinates": json.loads(f.get("coordinates_json", "[]")) if isinstance(f.get("coordinates_json"), str) else [],
-            "area_a": f.get("area_a", f.get("area_ha", 0) * 100)
-        }
-        for f in fields
-        if f.get("coordinates_json")
-    ])
-
-
-# =============================================================================
-# Gradio UI 関数
+# gr.Request版の関数（スタンドアロン起動用）
 # =============================================================================
 
 def register_field(
@@ -439,8 +52,9 @@ def register_field(
     beet_forbidden: bool,
     coords_json: str,
     request: gr.Request
-) -> Tuple[pd.DataFrame, str, str]:
-    """ほ場を登録（DB版）"""
+):
+    """ほ場を登録（gr.Request版）"""
+    import json
 
     # ユーザー情報取得
     if not request or not request.username:
@@ -500,8 +114,8 @@ def register_field(
     return fields_to_dataframe(fields), message, get_fields_json_for_map(fields)
 
 
-def delete_selected_field(field_id: str, request: gr.Request) -> Tuple[pd.DataFrame, str, str]:
-    """選択されたほ場を削除（DB版）"""
+def delete_selected_field(field_id: str, request: gr.Request):
+    """選択されたほ場を削除（gr.Request版）"""
 
     # ユーザー情報取得
     if not request or not request.username:
@@ -535,18 +149,8 @@ def delete_selected_field(field_id: str, request: gr.Request) -> Tuple[pd.DataFr
     return fields_to_dataframe(fields), message, get_fields_json_for_map(fields)
 
 
-def search_and_move_map(query: str) -> Tuple[str, str, str]:
-    """住所検索して地図を移動"""
-    lat, lng, message = search_address(query)
-
-    if lat is not None and lng is not None:
-        return message, str(lat), str(lng)
-    else:
-        return message, "", ""
-
-
-def export_csv(request: gr.Request) -> Tuple[str, str]:
-    """CSVファイルをエクスポート（DB版）"""
+def export_csv(request: gr.Request):
+    """CSVファイルをエクスポート（gr.Request版）"""
 
     # ユーザー情報取得
     if not request or not request.username:
@@ -607,7 +211,7 @@ def refresh_map(request: gr.Request):
     return generate_map_html(DEFAULT_LAT, DEFAULT_LNG, DEFAULT_ZOOM, fields)
 
 
-def load_initial_data(request: gr.Request) -> Tuple[pd.DataFrame, str, str]:
+def load_initial_data(request: gr.Request):
     """初期データ読み込み"""
     if not request or not request.username:
         return pd.DataFrame(), "ログインしてください", "[]"
@@ -658,13 +262,13 @@ def get_field_history(field_code: str, request: gr.Request) -> str:
 
 
 # =============================================================================
-# Gradio アプリケーション
+# Gradio アプリケーション（スタンドアロン起動用）
 # =============================================================================
 
 def create_app():
     """Gradioアプリを作成"""
 
-    with gr.Blocks(title="ほ場登録アプリ", theme=gr.themes.Soft()) as app:
+    with gr.Blocks(title="ほ場登録アプリ") as app:
         gr.Markdown("""
         # 🗺️ ほ場登録アプリ
 
@@ -851,5 +455,6 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7862,
         share=False,
-        auth=authenticate  # 認証機能追加
+        auth=authenticate,  # 認証機能追加
+        theme=gr.themes.Soft()  # Gradio 6.0: theme は launch() に移動
     )

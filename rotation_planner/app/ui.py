@@ -1,9 +1,6 @@
 """
-輪作計画メーカー - UIモジュール
-portal.py との統合用。認証は portal.py で一元管理。
-
-Note: このファイルは後方互換性のために残されています。
-      新しいコードは rotation_planner.app パッケージを使用してください。
+Gradio UIモジュール
+輪作計画メーカーのユーザーインターフェース
 """
 
 import gradio as gr
@@ -11,44 +8,37 @@ import os
 
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
-# 新しいパッケージから関数・定数をインポート
-from rotation_planner.app import (
-    # 定数
+from .constraints import (
     DEFAULT_CROPS,
     DEFAULT_PREFERRED_TRANSITIONS,
     DEFAULT_MAIN_CROPS,
-    # 関数
     build_constraints_table,
     update_constraints_table,
-    update_constraints_from_csv,
-    run_optimization,
+    update_constraints_from_csv
 )
-
-# 認証モジュール（ユーザー情報表示用）
-from auth import get_user_info
+from .optimizer import run_optimization
 
 # アプリのパス
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def create_rotation_planner_ui(user_state: gr.State = None):
+def create_app(auth_enabled: bool = False, auth_func=None):
     """
-    輪作計画メーカーのUIを作成
+    Gradioアプリを作成
 
     Args:
-        user_state: 外部から渡されるユーザー状態（portal.py統合時）
-                   None の場合は内部で作成
+        auth_enabled: 認証を有効にするかどうか
+        auth_func: 認証関数（auth_enabled=Trueの場合に使用）
 
     Returns:
         gr.Blocks: Gradioアプリケーション
     """
 
     with gr.Blocks(title="輪作計画メーカー") as app:
-        # ユーザー情報State（外部から渡されない場合は内部で作成）
-        if user_state is None:
-            user_state = gr.State(None)
+        # ユーザー情報State
+        user_state = gr.State(None)
 
-        # ヘッダー（ユーザー情報表示）
+        # ヘッダー
         with gr.Row():
             with gr.Column(scale=4):
                 gr.Markdown("""
@@ -58,19 +48,25 @@ def create_rotation_planner_ui(user_state: gr.State = None):
                 """)
             with gr.Column(scale=1):
                 user_info_display = gr.Markdown("", elem_id="user_info")
+                if auth_enabled:
+                    logout_btn = gr.Button("🚪 ログアウト", link="/logout", size="sm")
 
         # ログイン時のユーザー情報読み込み
         def on_load(request: gr.Request):
-            if request and hasattr(request, 'username') and request.username:
-                user = get_user_info(request.username)
-                if user:
-                    role_label = {
-                        "admin": "管理者",
-                        "ja_staff": "JA職員",
-                        "farmer": "農家"
-                    }.get(user["role"], user["role"])
-                    display_text = f"👤 **{user['display_name']}** ({role_label})"
-                    return user, display_text
+            if auth_enabled and request and hasattr(request, 'username') and request.username:
+                try:
+                    from auth import get_user_info
+                    user = get_user_info(request.username)
+                    if user:
+                        role_label = {
+                            "admin": "管理者",
+                            "ja_staff": "JA職員",
+                            "farmer": "農家"
+                        }.get(user["role"], user["role"])
+                        display_text = f"👤 **{user['display_name']}** ({role_label})"
+                        return user, display_text
+                except ImportError:
+                    pass
             return None, ""
 
         app.load(on_load, outputs=[user_state, user_info_display])
@@ -167,11 +163,11 @@ def create_rotation_planner_ui(user_state: gr.State = None):
 
                 gr.Markdown("""
                 **列の説明:**
-                - `min_ha`: 年間面積下限(ha)、空欄or0=下限なし
-                - `cap_ha`: 年間面積上限(ha)、空欄or0=無制限
-                - `min_gap_years`: 最小作付間隔(年)
-                - `min_fields`: 最小ほ場数
-                - `max_fields`: 最大ほ場数、空欄or0=無制限
+                - `最小(ha)`: 年間面積下限、空欄or0=下限なし
+                - `最大(ha)`: 年間面積上限、空欄or0=無制限
+                - `間隔(年)`: 最小作付間隔
+                - `最小筆数`: 年間最小ほ場数
+                - `最大筆数`: 年間最大ほ場数、空欄or0=無制限
                 """)
 
                 forbidden_text = gr.Textbox(
@@ -241,18 +237,14 @@ def create_rotation_planner_ui(user_state: gr.State = None):
     return app
 
 
-# =============================================================================
-# 単独起動用（認証なし）
-# =============================================================================
+def create_rotation_planner_ui(user_state: gr.State = None):
+    """
+    portal.py統合用のUI作成関数
 
-if __name__ == "__main__":
-    app = create_rotation_planner_ui()
-    app.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        allowed_paths=[
-            os.path.join(APP_DIR, "template_example.csv"),
-            os.path.join(APP_DIR, "template_empty.csv")
-        ]
-    )
+    Args:
+        user_state: 外部から渡されるユーザー状態
+
+    Returns:
+        gr.Blocks: Gradioアプリケーション
+    """
+    return create_app(auth_enabled=False)

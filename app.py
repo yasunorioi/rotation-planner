@@ -16,14 +16,14 @@ from ortools.sat.python import cp_model
 
 # 認証・DBアクセス
 from auth import authenticate, get_user_info, is_admin_role
+from db_access import FieldRepository, PlanRepository, CropHistoryRepository, UserRepository
 
 # =============================================================================
 # 定数・デフォルト値
 # =============================================================================
 
 DEFAULT_CROPS = [
-    "春小麦", "秋小麦", "大豆", "デントコーン", "WCS",
-    "てんさい", "馬鈴薯", "キャベツ", "にんじん", "だいこん"
+    "春小麦", "秋小麦", "大豆", "てんさい", "馬鈴薯"
 ]
 
 # デフォルト制約
@@ -31,13 +31,8 @@ DEFAULT_CONSTRAINTS = {
     "春小麦":     {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "秋小麦":     {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "大豆":       {"min_ha": None, "cap_ha": 12, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "デントコーン": {"min_ha": None, "cap_ha": 8, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "WCS":        {"min_ha": None, "cap_ha": 4, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "てんさい":   {"min_ha": None, "cap_ha": None, "min_gap_years": 4, "min_fields": 0, "max_fields": 2},
     "馬鈴薯":     {"min_ha": None, "cap_ha": None, "min_gap_years": 4, "min_fields": 0, "max_fields": None},
-    "キャベツ":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "にんじん":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "だいこん":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
 }
 
 # 固定の禁止遷移
@@ -47,7 +42,7 @@ FIXED_FORBIDDEN_TRANSITIONS = [
 ]
 
 # デフォルトの優先遷移
-DEFAULT_PREFERRED_TRANSITIONS = "てんさい->大豆:10, てんさい->春小麦:5, デントコーン->秋小麦:8"
+DEFAULT_PREFERRED_TRANSITIONS = "てんさい->大豆:10, てんさい->春小麦:5"
 
 # 主作物（面積変動を抑えたい）
 DEFAULT_MAIN_CROPS = "春小麦, 秋小麦, 大豆"
@@ -1499,12 +1494,227 @@ def create_app():
             if request.username:
                 user = get_user_info(request.username)
                 if user:
+                    # DBからuser_idを取得
+                    db_user = UserRepository.get_user_by_username(request.username)
+                    user_id = db_user.get('id') if db_user else None
+
                     role_label = {"admin": "管理者", "ja_staff": "JA職員", "farmer": "農家"}.get(user["role"], user["role"])
                     display_text = f"👤 **{user['display_name']}** ({role_label})"
-                    return user, display_text
+
+                    # user_stateにuser_idも含める
+                    user_data = {
+                        **user,
+                        'user_id': user_id
+                    }
+                    return user_data, display_text
             return None, ""
 
         app.load(on_load, outputs=[user_state, user_info_display])
+
+        # =================================================================
+        # DB統合: ほ場データ取得・計画保存機能
+        # =================================================================
+
+        def load_fields_from_db(user_info):
+            """DBからユーザーのほ場データを取得"""
+            if not user_info or not user_info.get('user_id'):
+                return pd.DataFrame(), "ログインが必要です"
+
+            user_id = user_info['user_id']
+            fields = FieldRepository.get_fields(user_id)
+
+            if not fields:
+                return pd.DataFrame(), "ほ場データがありません。ほ場登録から登録してください。"
+
+            # DataFrameに変換
+            df = pd.DataFrame(fields)
+            return df[['field_code', 'name', 'district', 'area_ha']], f"✅ {len(fields)}件のほ場を読み込みました"
+
+        def load_crop_history_from_db(user_info):
+            """DBからほ場の作付履歴を取得してCSV形式で返す"""
+            if not user_info or not user_info.get('user_id'):
+                return None, "ログインが必要です"
+
+            user_id = user_info['user_id']
+            fields = FieldRepository.get_fields(user_id)
+
+            if not fields:
+                return None, "ほ場データがありません"
+
+            # 作付履歴を取得
+            all_histories = []
+            years = set()
+
+            for field in fields:
+                history = CropHistoryRepository.get_history(field['id'])
+                for h in history:
+                    years.add(h['year'])
+                    all_histories.append({
+                        'field_id': field['id'],
+                        'field_code': field['field_code'],
+                        'name': field['name'],
+                        'district': field.get('district', ''),
+                        'area_ha': field['area_ha'],
+                        'year': h['year'],
+                        'crop': h['crop']
+                    })
+
+            if not all_histories:
+                # 履歴がない場合はほ場データのみで作成
+                rows = []
+                for field in fields:
+                    rows.append({
+                        'ほ場ID': field['field_code'],
+                        '地区': field.get('district', ''),
+                        'ほ場名': field['name'],
+                        '面積(ha)': field['area_ha']
+                    })
+                df = pd.DataFrame(rows)
+                return df, f"✅ {len(fields)}件のほ場（履歴なし）"
+
+            # ピボットテーブル形式に変換
+            df = pd.DataFrame(all_histories)
+            pivot = df.pivot_table(
+                index=['field_code', 'name', 'district', 'area_ha'],
+                columns='year',
+                values='crop',
+                aggfunc='first'
+            ).reset_index()
+
+            # 列名を整理
+            pivot.columns.name = None
+            rename_map = {
+                'field_code': 'ほ場ID',
+                'name': 'ほ場名',
+                'district': '地区',
+                'area_ha': '面積(ha)'
+            }
+            pivot = pivot.rename(columns=rename_map)
+
+            # 年列をR形式に変換
+            year_cols = [c for c in pivot.columns if isinstance(c, int)]
+            for year in year_cols:
+                pivot = pivot.rename(columns={year: f'R{year}'})
+
+            return pivot, f"✅ {len(fields)}件のほ場、{len(years)}年分の履歴"
+
+        def save_plan_to_db(user_info, plan_name, result_df, constraints_data):
+            """計画をDBに保存"""
+            if not user_info or not user_info.get('user_id'):
+                return "エラー: ログインが必要です"
+
+            if result_df is None or len(result_df) == 0:
+                return "エラー: 保存する計画がありません"
+
+            user_id = user_info['user_id']
+
+            try:
+                # 年列を特定
+                year_cols = [c for c in result_df.columns if c.startswith('R') or c.startswith('📍R')]
+                if not year_cols:
+                    return "エラー: 計画データの形式が不正です"
+
+                # 年の範囲を取得
+                years = [int(c.replace('📍', '').replace('R', '')) for c in year_cols]
+                start_year = min(years)
+                end_year = max(years)
+
+                # 計画詳細を構築
+                details = []
+                for _, row in result_df.iterrows():
+                    field_code = row.get('ほ場ID', row.get('field_id', ''))
+                    # ほ場IDからDB上のfield_idを取得
+                    field = FieldRepository.get_field_by_code(user_id, field_code)
+                    if not field:
+                        continue
+
+                    for year_col in year_cols:
+                        year = int(year_col.replace('📍', '').replace('R', ''))
+                        crop = row.get(year_col, '')
+                        if pd.notna(crop) and str(crop).strip():
+                            details.append({
+                                'field_id': field['id'],
+                                'year': year,
+                                'crop': str(crop).strip()
+                            })
+
+                # 計画を作成
+                plan_data = {
+                    'name': plan_name or f"計画_{start_year}-{end_year}",
+                    'start_year': start_year,
+                    'end_year': end_year,
+                    'constraints': constraints_data or {},
+                    'details': details
+                }
+
+                plan_id = PlanRepository.create_plan(user_id, plan_data)
+                return f"✅ 計画を保存しました（ID: {plan_id}）"
+
+            except Exception as e:
+                return f"エラー: 計画の保存に失敗しました - {str(e)}"
+
+        def load_saved_plans(user_info):
+            """保存済み計画一覧を取得"""
+            if not user_info or not user_info.get('user_id'):
+                return gr.update(choices=[], value=None)
+
+            user_id = user_info['user_id']
+            plans = PlanRepository.get_plans(user_id)
+
+            if not plans:
+                return gr.update(choices=[], value=None)
+
+            choices = [(f"{p['name']} (R{p['start_year']}-R{p['end_year']})", p['id']) for p in plans]
+            return gr.update(choices=choices, value=choices[0][1] if choices else None)
+
+        def load_plan_detail(plan_id, user_info):
+            """保存済み計画を読み込み"""
+            if not plan_id or not user_info:
+                return None, None, "計画を選択してください"
+
+            plan = PlanRepository.get_plan(plan_id)
+            if not plan:
+                return None, None, "計画が見つかりません"
+
+            # セキュリティ: user_idチェック
+            if plan.get('user_id') != user_info.get('user_id'):
+                return None, None, "アクセス権限がありません"
+
+            # 計画詳細をDataFrameに変換
+            details = plan.get('details', [])
+            if not details:
+                return None, None, "計画詳細がありません"
+
+            # ピボットテーブル形式に変換
+            rows = []
+            for d in details:
+                rows.append({
+                    'field_code': d['field_code'],
+                    'field_name': d['field_name'],
+                    'district': d.get('district', ''),
+                    'year': d['year'],
+                    'crop': d['crop']
+                })
+
+            df = pd.DataFrame(rows)
+            pivot = df.pivot_table(
+                index=['field_code', 'field_name', 'district'],
+                columns='year',
+                values='crop',
+                aggfunc='first'
+            ).reset_index()
+
+            # 列名を整理
+            pivot.columns.name = None
+            rename_map = {'field_code': 'ほ場ID', 'field_name': 'ほ場名', 'district': '地区'}
+            pivot = pivot.rename(columns=rename_map)
+
+            # 年列をR形式に
+            year_cols = [c for c in pivot.columns if isinstance(c, int)]
+            for year in year_cols:
+                pivot = pivot.rename(columns={year: f'R{year}'})
+
+            return pivot, None, f"✅ 計画「{plan['name']}」を読み込みました"
 
         with gr.Row():
             gr.DownloadButton("📥 サンプルCSV", value=os.path.join(APP_DIR, "template_example.csv"))
@@ -1520,8 +1730,21 @@ def create_app():
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("## 📂 入力")
-                
-                csv_file = gr.File(label="CSVファイル", file_types=[".csv"])
+
+                # データソース選択（DBまたはCSV）
+                with gr.Accordion("🗄️ DBからほ場データを読み込む", open=False):
+                    gr.Markdown("登録済みのほ場・作付履歴を使用して計画を作成します。")
+                    load_from_db_btn = gr.Button("📥 DBからほ場・履歴を読み込む", variant="secondary")
+                    db_load_status = gr.Textbox(label="読み込み状態", interactive=False)
+                    db_fields_table = gr.Dataframe(
+                        label="読み込んだほ場",
+                        headers=["ほ場ID", "ほ場名", "地区", "面積(ha)"],
+                        visible=False
+                    )
+
+                with gr.Accordion("📄 CSVファイルからインポート", open=True):
+                    gr.Markdown("新規ユーザーまたは一括インポート用")
+                    csv_file = gr.File(label="CSVファイル", file_types=[".csv"])
                 
                 with gr.Row():
                     area_unit = gr.Radio(
@@ -1590,7 +1813,7 @@ def create_app():
                 constraints_table = gr.Dataframe(
                     value=build_constraints_table(DEFAULT_CROPS),
                     label="制約テーブル",
-                    headers=["crop", "min_ha", "cap_ha", "min_gap_years", "min_fields", "max_fields"],
+                    headers=["作物", "最小(ha)", "最大(ha)", "間隔(年)", "最小筆数", "最大筆数"],
                     datatype=["str", "number", "number", "number", "number", "number"],
                     interactive=True,
                     row_count=(10, "dynamic")
@@ -1598,11 +1821,11 @@ def create_app():
 
                 gr.Markdown("""
                 **列の説明:**
-                - `min_ha`: 年間面積下限(ha)、空欄or0=下限なし
-                - `cap_ha`: 年間面積上限(ha)、空欄or0=無制限
-                - `min_gap_years`: 最小作付間隔(年)
-                - `min_fields`: 最小ほ場数
-                - `max_fields`: 最大ほ場数、空欄or0=無制限
+                - `最小(ha)`: 年間面積下限、空欄or0=下限なし
+                - `最大(ha)`: 年間面積上限、空欄or0=無制限
+                - `間隔(年)`: 最小作付間隔
+                - `最小筆数`: 年間最小ほ場数
+                - `最大筆数`: 年間最大ほ場数、空欄or0=無制限
                 """)
                 
                 forbidden_text = gr.Textbox(
@@ -1658,7 +1881,15 @@ def create_app():
                 )
         
         csv_download = gr.File(label="📥 計画CSVダウンロード")
-        
+
+        # DB保存機能
+        with gr.Accordion("💾 計画をDBに保存", open=False):
+            gr.Markdown("生成した計画をデータベースに保存します。")
+            with gr.Row():
+                plan_name_input = gr.Textbox(label="計画名", placeholder="例: 2026年度輪作計画")
+                save_plan_btn = gr.Button("💾 DBに保存", variant="secondary")
+            save_status = gr.Textbox(label="保存状態", interactive=False)
+
         run_btn.click(
             fn=run_optimization,
             inputs=[
@@ -1668,7 +1899,24 @@ def create_app():
             ],
             outputs=[result_table, summary_table, csv_download, message_box]
         )
-    
+
+        # DB読み込みボタンのイベント
+        load_from_db_btn.click(
+            fn=load_crop_history_from_db,
+            inputs=[user_state],
+            outputs=[db_fields_table, db_load_status]
+        ).then(
+            fn=lambda: gr.update(visible=True),
+            outputs=[db_fields_table]
+        )
+
+        # 計画保存ボタンのイベント
+        save_plan_btn.click(
+            fn=save_plan_to_db,
+            inputs=[user_state, plan_name_input, result_table, gr.State({})],
+            outputs=[save_status]
+        )
+
     return app
 
 if __name__ == "__main__":

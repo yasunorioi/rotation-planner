@@ -1,0 +1,7 @@
+crop,min_ha,cap_ha,min_gap_years,min_fields,max_fields
+春小麦,6,10,0,0,
+秋小麦,6,10,0,0,
+大豆,7,12,0,0,
+デントコーン,5,8,0,0,
+WCS,2,2,0,1,
+てんさい,2,5,4,1,2

@@ -1,0 +1,166 @@
+-- ═══════════════════════════════════════════════════════════════
+-- 農業管理アプリ - SQLiteスキーマ
+-- Version: 1.0
+-- Created: 2026-01-29
+-- ═══════════════════════════════════════════════════════════════
+
+-- 外部キー制約を有効化
+PRAGMA foreign_keys = ON;
+
+-- ═══════════════════════════════════════════════════════════════
+-- 1. 組織マスタ（JA、個人農家グループ等）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('JA', 'cooperative', 'individual')),
+    settings_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 2. ユーザー（農家、JA職員）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    email TEXT,
+    role TEXT NOT NULL CHECK (role IN ('farmer', 'ja_staff', 'admin')),
+    org_id INTEGER REFERENCES organizations(id),
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 3. ほ場
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS fields (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    field_code TEXT NOT NULL,
+    district TEXT,
+    name TEXT,
+    area_ha REAL NOT NULL,
+    area_a REAL GENERATED ALWAYS AS (area_ha * 100) STORED,
+    beet_forbidden INTEGER DEFAULT 0,
+    coordinates_json TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, field_code)
+);
+CREATE INDEX IF NOT EXISTS idx_fields_user ON fields(user_id);
+CREATE INDEX IF NOT EXISTS idx_fields_district ON fields(district);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 4. 作付履歴
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS crop_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field_id INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+    year TEXT NOT NULL,
+    crop TEXT NOT NULL,
+    is_inferred INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(field_id, year)
+);
+CREATE INDEX IF NOT EXISTS idx_crop_history_field ON crop_history(field_id);
+CREATE INDEX IF NOT EXISTS idx_crop_history_year ON crop_history(year);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 5. 輪作計画
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS rotation_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    start_year TEXT NOT NULL,
+    end_year TEXT NOT NULL,
+    constraints_json TEXT,
+    metadata_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_rotation_plans_user ON rotation_plans(user_id);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 6. 輪作計画詳細（計画されたほ場×年の作付）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS plan_details (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES rotation_plans(id) ON DELETE CASCADE,
+    field_id INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+    year TEXT NOT NULL,
+    crop TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plan_id, field_id, year)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_details_plan ON plan_details(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_details_field ON plan_details(field_id);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 7. 作物制約（ユーザーごとの面積上限等）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS crop_constraints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    crop TEXT NOT NULL,
+    cap_ha REAL,
+    min_ha REAL,
+    min_gap_years INTEGER,
+    min_fields INTEGER,
+    max_fields INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, crop)
+);
+CREATE INDEX IF NOT EXISTS idx_crop_constraints_user ON crop_constraints(user_id);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 8. 防除マスタ（組織単位で共有）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS pesticide_masters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    org_id INTEGER REFERENCES organizations(id),
+    crop TEXT NOT NULL,
+    month INTEGER,
+    period TEXT,
+    target TEXT,
+    pesticide_name TEXT NOT NULL,
+    dilution_rate TEXT,
+    amount_per_10a REAL,
+    unit TEXT,
+    days_before_harvest TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pesticide_masters_org ON pesticide_masters(org_id);
+CREATE INDEX IF NOT EXISTS idx_pesticide_masters_crop ON pesticide_masters(crop);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 9. 在庫
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pesticide_name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    unit TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, pesticide_name)
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_user ON inventory(user_id);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 初期データ: デフォルト組織
+-- ═══════════════════════════════════════════════════════════════
+INSERT OR IGNORE INTO organizations (id, name, type, settings_json)
+VALUES (1, 'JA北海道', 'JA', '{"region": "北海道", "default_crops": ["春小麦", "秋小麦", "大豆", "てんさい", "馬鈴薯"]}');
+
+INSERT OR IGNORE INTO organizations (id, name, type, settings_json)
+VALUES (2, '個人農家（デフォルト）', 'individual', '{}');

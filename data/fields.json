@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-01-29T12:20:59.701375",
+  "fields": [
+    {
+      "field_id": "F001",
+      "district": "A地区",
+      "name": "北側ほ場",
+      "area_ha": 2.5,
+      "beet_forbidden": false
+    },
+    {
+      "field_id": "F002",
+      "district": "B地区",
+      "name": "南側ほ場",
+      "area_ha": 1.8,
+      "beet_forbidden": true
+    },
+    {
+      "field_id": "F003",
+      "district": "C地区",
+      "name": "東側ほ場",
+      "area_ha": 3.0,
+      "beet_forbidden": false
+    }
+  ]
+}

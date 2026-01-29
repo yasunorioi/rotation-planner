@@ -28,3 +28,16 @@ Thumbs.db
 # 一時ファイル
 *.tmp
 *.bak
+data/*.backup_*
+
+# Node.js（テスト用）
+node_modules/
+package-lock.json
+
+# テスト成果物
+test-results/
+*.png
+test_*.js
+
+# バックアップ
+*.backup

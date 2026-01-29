@@ -1,0 +1,4 @@
+# 輪作計画メーカー デモ版
+gradio>=5.0.0
+pandas
+numpy

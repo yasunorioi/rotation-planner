@@ -1,0 +1,167 @@
+name: Deploy Demo to Hugging Face
+
+on:
+  # mainブランチへのpush時に自動実行
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/rotation_planner_ui/**'
+
+  # 手動実行も可能
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  WORKING_DIR: docs/rotation_planner_ui
+  PYTHON_VERSION: '3.11'
+  HF_SPACE_ID: 'rotation-planner-demo'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub gradio pandas
+
+      - name: Prepare demo files
+        run: |
+          mkdir -p deploy_package
+
+          # デモファイルをコピー
+          cp -r demo deploy_package/
+
+          # rotation_plannerパッケージをコピー
+          cp -r rotation_planner deploy_package/
+
+          # 必要なファイルをコピー
+          [ -f requirements.txt ] && cp requirements.txt deploy_package/ || true
+          [ -f db_access.py ] && cp db_access.py deploy_package/ || true
+
+          # Hugging Face Space用のapp.pyを作成
+          cat > deploy_package/app.py << 'EOF'
+          """
+          Rotation Planner Demo - Hugging Face Space Entry Point
+          """
+          import sys
+          sys.path.insert(0, '.')
+
+          from demo.pesticide_demo import create_pesticide_demo_ui
+
+          demo = create_pesticide_demo_ui()
+
+          if __name__ == "__main__":
+              demo.launch()
+          EOF
+
+          # Hugging Face Space用のREADME.mdを作成
+          cat > deploy_package/README.md << 'EOF'
+          ---
+          title: Rotation Planner Demo
+          emoji: 🌾
+          colorFrom: green
+          colorTo: yellow
+          sdk: gradio
+          sdk_version: "4.44.0"
+          app_file: app.py
+          pinned: false
+          license: mit
+          ---
+
+          # 輪作計画メーカー デモ版
+
+          農薬必要量計算のデモンストレーションです。
+
+          ## 機能
+          - サンプル輪作計画から農薬必要量を計算
+          - てんさい・大豆・春小麦・秋小麦に対応
+          - 希釈倍率・直接指定の両方式で計算
+
+          ## 使い方
+          1. サンプルデータを使用するか、輪作計画CSVをアップロード
+          2. 対象年を選択
+          3. 計算実行ボタンをクリック
+
+          ---
+          Powered by [Gradio](https://gradio.app)
+          EOF
+
+      - name: Deploy to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::HF_TOKEN secret is not configured"
+            exit 1
+          fi
+
+          echo "Deploying to Hugging Face Space: ${{ env.HF_SPACE_ID }}"
+
+          python << 'PYEOF'
+          import os
+          from huggingface_hub import HfApi, login
+
+          # Login
+          token = os.environ.get('HF_TOKEN')
+          login(token=token)
+
+          api = HfApi()
+          space_id = os.environ.get('HF_SPACE_ID', 'rotation-planner-demo')
+
+          # Check if space exists, create if not
+          try:
+              api.repo_info(repo_id=space_id, repo_type="space")
+              print(f"Space {space_id} exists, updating...")
+          except Exception:
+              print(f"Creating new space: {space_id}")
+              api.create_repo(repo_id=space_id, repo_type="space", space_sdk="gradio", private=False)
+
+          # Upload files
+          api.upload_folder(
+              folder_path="deploy_package",
+              repo_id=space_id,
+              repo_type="space",
+              commit_message=f"Auto-deploy from GitHub Actions (commit: {os.environ.get('GITHUB_SHA', 'unknown')[:7]})"
+          )
+
+          print(f"Successfully deployed to https://huggingface.co/spaces/{space_id}")
+          PYEOF
+
+      - name: Post deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Space | [${{ env.HF_SPACE_ID }}](https://huggingface.co/spaces/${{ env.HF_SPACE_ID }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY

@@ -540,6 +540,5 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7863,
         share=False,
-        auth=authenticate,  # 認証を一元管理
-        head=CUSTOM_HEAD
+        auth=authenticate  # 認証を一元管理
     )

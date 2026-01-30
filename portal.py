@@ -17,9 +17,9 @@ from rotation_planner.common import (
 )
 
 # UIモジュール
-from app_ui import create_rotation_planner_ui
-from pesticide_ui import create_pesticide_order_ui
-from field_ui import create_field_register_ui
+from rotation_planner.app import create_rotation_planner_ui
+from rotation_planner.pesticide import create_pesticide_order_ui
+from rotation_planner.field import create_field_register_ui
 
 # =============================================================================
 # 定数
@@ -381,7 +381,7 @@ def create_app():
                     if not user_state_dict or not user_state_dict.get("user_id"):
                         return None, "エラー: ログインが必要です"
 
-                    from field_ui import export_csv_with_state
+                    from rotation_planner.field import export_csv_with_state
                     csv_path, message = export_csv_with_state(user_state_dict)
 
                     if csv_path:
@@ -482,8 +482,8 @@ def create_app():
             if not user_state_dict or not user_state_dict.get("user_id"):
                 return None, None, "", ""
 
-            from field_ui import load_initial_data_with_state
-            return load_initial_data_with_state(user_state_dict)
+            from rotation_planner.field import load_initial_data
+            return load_initial_data(user_state_dict)
 
         app.load(
             fn=on_app_load,

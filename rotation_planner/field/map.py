@@ -356,14 +356,21 @@ def generate_map_html(
             function sendCoordinatesToGradio(coords) {{
                 var coordsJson = coords ? JSON.stringify(coords) : '';
 
-                // Gradioのhidden textboxに値を設定
-                var event = new CustomEvent('polygon_update', {{
-                    detail: {{ coordinates: coordsJson }}
-                }});
-                document.dispatchEvent(event);
-
-                // 親ウィンドウにも送信（iframe対応）
-                if (window.parent && window.parent !== window) {{
+                // 親ウィンドウのGradio textboxに直接アクセス
+                try {{
+                    if (window.parent && window.parent !== window) {{
+                        var coordsInput = window.parent.document.querySelector('#coords_input textarea');
+                        if (coordsInput) {{
+                            coordsInput.value = coordsJson;
+                            coordsInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            console.log('Coordinates sent to Gradio:', coordsJson.substring(0, 50) + '...');
+                        }} else {{
+                            console.warn('coords_input textarea not found in parent');
+                        }}
+                    }}
+                }} catch (e) {{
+                    console.error('Failed to send coordinates to Gradio:', e);
+                    // フォールバック: postMessage
                     window.parent.postMessage({{
                         type: 'polygon_coordinates',
                         coordinates: coordsJson

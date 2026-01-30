@@ -244,9 +244,9 @@ if __name__ == "__main__":
     is_hf_spaces = os.environ.get("SPACE_ID") is not None
 
     if is_hf_spaces:
-        # HF Spacesでは認証なし、シンプルに起動
+        # HF Spacesでは認証なし、SSR無効で起動
         print("HF Spaces環境で起動します（認証なし）")
-        demo.launch()
+        demo.launch(ssr_mode=False)
     else:
         # ローカル環境
         launch_kwargs = {

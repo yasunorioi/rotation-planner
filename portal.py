@@ -546,6 +546,19 @@ def create_app():
             outputs=[field_components["crop_input"]]
         )
 
+        # 作物設定保存後にほ場登録の作物プルダウンを更新
+        crop_settings_components["save_master_btn"].click(
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["crop_input"]]
+        )
+
+        crop_settings_components["add_custom_btn"].click(
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["crop_input"]]
+        )
+
     return app
 
 

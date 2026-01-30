@@ -324,6 +324,8 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
         "custom_crops_table": custom_crops_table,
         "message": message,
         "load_fn": load_crop_settings,
+        "save_master_btn": save_master_btn,
+        "add_custom_btn": add_custom_btn,
     }
 
 

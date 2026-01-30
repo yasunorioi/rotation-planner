@@ -97,8 +97,10 @@ def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> 
     Returns:
         メッセージ
     """
+    print(f"[DEBUG] save_master_crops: user_state={user_state}, selected_crops={selected_crops}")
     user_id = user_state.get("user_id") if user_state else None
     if not user_id:
+        print(f"[DEBUG] user_id is None or empty")
         return "エラー: ログインしてください"
 
     # 作物名からIDに変換

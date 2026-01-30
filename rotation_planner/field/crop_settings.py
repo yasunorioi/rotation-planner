@@ -86,7 +86,7 @@ def load_crop_settings(user_state: Dict[str, Any]) -> Tuple[List[str], pd.DataFr
     return master_crops, custom_df, msg
 
 
-def save_master_crops(selected_crops: List[str], request) -> str:
+def save_master_crops(selected_crops: List[str], request: "gr.Request" = None) -> str:
     """
     マスタ作物の選択を保存
 
@@ -128,7 +128,7 @@ def save_master_crops(selected_crops: List[str], request) -> str:
 def add_custom_crop(
     parent_crop_name: str,
     custom_name: str,
-    request
+    request: "gr.Request" = None
 ) -> Tuple[pd.DataFrame, str]:
     """
     カスタム作物を追加
@@ -175,7 +175,7 @@ def add_custom_crop(
 
 def delete_custom_crop(
     selected_rows: List[List],
-    request
+    request: "gr.Request" = None
 ) -> Tuple[pd.DataFrame, str]:
     """
     カスタム作物を削除
@@ -326,7 +326,7 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
     # 代替として「ID入力して削除」方式も検討
 
     # 再読込
-    def reload_all(request):
+    def reload_all(request: "gr.Request" = None):
         from rotation_planner.common import UserRepository
         user_state_dict = {}
         if request and hasattr(request, 'username') and request.username:

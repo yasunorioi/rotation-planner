@@ -86,19 +86,26 @@ def load_crop_settings(user_state: Dict[str, Any]) -> Tuple[List[str], pd.DataFr
     return master_crops, custom_df, msg
 
 
-def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> str:
+def save_master_crops(selected_crops: List[str], request) -> str:
     """
     マスタ作物の選択を保存
 
     Args:
         selected_crops: 選択された作物名のリスト
-        user_state: ユーザー状態
+        request: gr.Request オブジェクト
 
     Returns:
         メッセージ
     """
-    print(f"[DEBUG] save_master_crops: user_state={user_state}, selected_crops={selected_crops}")
-    user_id = user_state.get("user_id") if user_state else None
+    # requestからuser_idを取得
+    from rotation_planner.common import UserRepository
+    user_id = None
+    if request and hasattr(request, 'username') and request.username:
+        db_user = UserRepository.get_user_by_username(request.username)
+        user_id = db_user.get('id') if db_user else None
+
+    print(f"[DEBUG] save_master_crops: request.username={getattr(request, 'username', None)}, user_id={user_id}, selected_crops={selected_crops}")
+
     if not user_id:
         print(f"[DEBUG] user_id is None or empty")
         return "エラー: ログインしてください"
@@ -121,7 +128,7 @@ def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> 
 def add_custom_crop(
     parent_crop_name: str,
     custom_name: str,
-    user_state: Dict[str, Any]
+    request
 ) -> Tuple[pd.DataFrame, str]:
     """
     カスタム作物を追加
@@ -129,12 +136,18 @@ def add_custom_crop(
     Args:
         parent_crop_name: 親作物名（マスタから選択）
         custom_name: カスタム名（例: ブロッコリー（2作目））
-        user_state: ユーザー状態
+        request: gr.Request オブジェクト
 
     Returns:
         (更新後のカスタム作物DataFrame, メッセージ)
     """
-    user_id = user_state.get("user_id") if user_state else None
+    # requestからuser_idを取得
+    from rotation_planner.common import UserRepository
+    user_id = None
+    if request and hasattr(request, 'username') and request.username:
+        db_user = UserRepository.get_user_by_username(request.username)
+        user_id = db_user.get('id') if db_user else None
+
     if not user_id:
         return pd.DataFrame(columns=["ID", "作物名", "親作物"]), "エラー: ログインしてください"
 
@@ -162,19 +175,25 @@ def add_custom_crop(
 
 def delete_custom_crop(
     selected_rows: List[List],
-    user_state: Dict[str, Any]
+    request
 ) -> Tuple[pd.DataFrame, str]:
     """
     カスタム作物を削除
 
     Args:
         selected_rows: 選択された行
-        user_state: ユーザー状態
+        request: gr.Request オブジェクト
 
     Returns:
         (更新後のカスタム作物DataFrame, メッセージ)
     """
-    user_id = user_state.get("user_id") if user_state else None
+    # requestからuser_idを取得
+    from rotation_planner.common import UserRepository
+    user_id = None
+    if request and hasattr(request, 'username') and request.username:
+        db_user = UserRepository.get_user_by_username(request.username)
+        user_id = db_user.get('id') if db_user else None
+
     if not user_id:
         return pd.DataFrame(columns=["ID", "作物名", "親作物"]), "エラー: ログインしてください"
 
@@ -288,17 +307,17 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
 
     # ============= イベントハンドラ =============
 
-    # マスタ作物保存
+    # マスタ作物保存（gr.Requestは自動的に渡される）
     save_master_btn.click(
         fn=save_master_crops,
-        inputs=[crop_checkboxes, user_state],
+        inputs=[crop_checkboxes],
         outputs=[message]
     )
 
     # カスタム作物追加
     add_custom_btn.click(
         fn=add_custom_crop,
-        inputs=[parent_crop_dropdown, custom_name_input, user_state],
+        inputs=[parent_crop_dropdown, custom_name_input],
         outputs=[custom_crops_table, message]
     )
 
@@ -307,12 +326,18 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
     # 代替として「ID入力して削除」方式も検討
 
     # 再読込
-    def reload_all(user_state_dict):
+    def reload_all(request):
+        from rotation_planner.common import UserRepository
+        user_state_dict = {}
+        if request and hasattr(request, 'username') and request.username:
+            db_user = UserRepository.get_user_by_username(request.username)
+            if db_user:
+                user_state_dict = {"user_id": db_user.get('id')}
         return load_crop_settings(user_state_dict)
 
     refresh_btn.click(
         fn=reload_all,
-        inputs=[user_state],
+        inputs=[],
         outputs=[crop_checkboxes, custom_crops_table, message]
     )
 

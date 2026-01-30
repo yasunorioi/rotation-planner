@@ -731,71 +731,160 @@ class CropMasterRepository:
 # =============================================================================
 
 class UserCropRepository:
-    """ユーザーが選択した作物のCRUD操作"""
+    """
+    ユーザーが選択した作物のCRUD操作
+
+    user_cropsテーブル構造:
+        - id: 主キー
+        - user_id: ユーザーID
+        - parent_crop_id: 親作物ID（crop_masterへの参照、防除連携用）
+        - custom_name: カスタム名（NULL=マスタ名をそのまま使用）
+        - created_at: 作成日時
+    """
 
     @staticmethod
     def get_user_crops(user_id: int) -> List[Dict[str, Any]]:
-        """ユーザーの選択した作物を取得"""
+        """
+        ユーザーの選択した作物を取得
+
+        Returns:
+            作物リスト。各要素は:
+            - id: user_crops.id
+            - parent_crop_id: crop_master.id
+            - parent_name: crop_master.name（防除連携用）
+            - name: 表示名（custom_nameがあればそれ、なければparent_name）
+            - custom_name: カスタム名（NULLの場合あり）
+        """
         with get_db() as conn:
             cursor = conn.execute("""
-                SELECT cm.* FROM crop_master cm
-                INNER JOIN user_crops uc ON cm.id = uc.crop_id
+                SELECT
+                    uc.id,
+                    uc.parent_crop_id,
+                    cm.name as parent_name,
+                    uc.custom_name,
+                    COALESCE(uc.custom_name, cm.name) as name
+                FROM user_crops uc
+                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
                 WHERE uc.user_id = ? AND cm.is_active = 1
-                ORDER BY cm.display_order, cm.name
+                ORDER BY cm.display_order, name
             """, (user_id,))
             return rows_to_list(cursor.fetchall())
 
     @staticmethod
     def get_user_crop_ids(user_id: int) -> List[int]:
-        """ユーザーの選択した作物IDリストを取得"""
+        """ユーザーの選択した親作物IDリストを取得（重複なし）"""
         with get_db() as conn:
             cursor = conn.execute("""
-                SELECT crop_id FROM user_crops
+                SELECT DISTINCT parent_crop_id FROM user_crops
                 WHERE user_id = ?
             """, (user_id,))
             return [row[0] for row in cursor.fetchall()]
 
     @staticmethod
     def set_user_crops(user_id: int, crop_ids: List[int]) -> bool:
-        """ユーザーの作物選択を設定（既存は全削除して再登録）"""
+        """
+        ユーザーの作物選択を設定（マスタからの選択、カスタム名なし）
+        既存のカスタム名なしエントリのみ削除して再登録
+        """
         with get_db() as conn:
-            # 既存を削除
-            conn.execute("DELETE FROM user_crops WHERE user_id = ?", (user_id,))
+            # カスタム名なしのエントリを削除
+            conn.execute("""
+                DELETE FROM user_crops
+                WHERE user_id = ? AND custom_name IS NULL
+            """, (user_id,))
 
             # 新規登録
             for crop_id in crop_ids:
                 conn.execute("""
-                    INSERT INTO user_crops (user_id, crop_id)
-                    VALUES (?, ?)
+                    INSERT OR IGNORE INTO user_crops (user_id, parent_crop_id, custom_name)
+                    VALUES (?, ?, NULL)
                 """, (user_id, crop_id))
 
             conn.commit()
             return True
 
     @staticmethod
-    def add_user_crop(user_id: int, crop_id: int) -> bool:
-        """ユーザーに作物を追加"""
+    def add_user_crop(user_id: int, parent_crop_id: int, custom_name: str = None) -> int:
+        """
+        ユーザーに作物を追加
+
+        Args:
+            user_id: ユーザーID
+            parent_crop_id: 親作物ID（crop_master.id）
+            custom_name: カスタム名（例: "ブロッコリー（2作目）"）
+
+        Returns:
+            新規作成されたuser_crops.id
+        """
         with get_db() as conn:
-            try:
-                conn.execute("""
-                    INSERT OR IGNORE INTO user_crops (user_id, crop_id)
-                    VALUES (?, ?)
-                """, (user_id, crop_id))
-                conn.commit()
-                return True
-            except Exception:
-                return False
+            cursor = conn.execute("""
+                INSERT INTO user_crops (user_id, parent_crop_id, custom_name)
+                VALUES (?, ?, ?)
+            """, (user_id, parent_crop_id, custom_name))
+            conn.commit()
+            return cursor.lastrowid
 
     @staticmethod
-    def remove_user_crop(user_id: int, crop_id: int) -> bool:
-        """ユーザーから作物を削除"""
+    def remove_user_crop(user_id: int, user_crop_id: int) -> bool:
+        """ユーザーから作物を削除（user_crops.idで指定）"""
         with get_db() as conn:
             conn.execute("""
                 DELETE FROM user_crops
-                WHERE user_id = ? AND crop_id = ?
-            """, (user_id, crop_id))
+                WHERE user_id = ? AND id = ?
+            """, (user_id, user_crop_id))
             conn.commit()
             return True
+
+    @staticmethod
+    def remove_user_crop_by_parent(user_id: int, parent_crop_id: int, custom_name: str = None) -> bool:
+        """ユーザーから作物を削除（parent_crop_id + custom_nameで指定）"""
+        with get_db() as conn:
+            if custom_name:
+                conn.execute("""
+                    DELETE FROM user_crops
+                    WHERE user_id = ? AND parent_crop_id = ? AND custom_name = ?
+                """, (user_id, parent_crop_id, custom_name))
+            else:
+                conn.execute("""
+                    DELETE FROM user_crops
+                    WHERE user_id = ? AND parent_crop_id = ? AND custom_name IS NULL
+                """, (user_id, parent_crop_id))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def get_parent_crop_id_by_name(user_id: int, crop_name: str) -> Optional[int]:
+        """
+        作物名から親作物IDを取得（防除連携用）
+
+        Args:
+            user_id: ユーザーID
+            crop_name: 作物名（カスタム名 or マスタ名）
+
+        Returns:
+            parent_crop_id（見つからない場合はNone）
+        """
+        with get_db() as conn:
+            # まずカスタム名で検索
+            cursor = conn.execute("""
+                SELECT parent_crop_id FROM user_crops
+                WHERE user_id = ? AND custom_name = ?
+            """, (user_id, crop_name))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+
+            # 次にマスタ名で検索
+            cursor = conn.execute("""
+                SELECT uc.parent_crop_id FROM user_crops uc
+                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
+                WHERE uc.user_id = ? AND cm.name = ? AND uc.custom_name IS NULL
+            """, (user_id, crop_name))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+
+            return None
 
 
 # =============================================================================

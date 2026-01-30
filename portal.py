@@ -536,9 +536,14 @@ if (DEBUG) console.log('[PORTAL] Debug mode ON');
 
 if __name__ == "__main__":
     app = create_app()
-    app.launch(
-        server_name="0.0.0.0",
-        server_port=7863,
-        share=False,
-        auth=authenticate  # 認証を一元管理
-    )
+    import os
+    # HF Spaces環境では server_name/port を指定しない
+    if os.environ.get("SPACE_ID"):
+        app.launch(auth=authenticate)
+    else:
+        app.launch(
+            server_name="0.0.0.0",
+            server_port=7863,
+            share=False,
+            auth=authenticate
+        )

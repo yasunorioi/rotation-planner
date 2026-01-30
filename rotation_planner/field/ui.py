@@ -43,6 +43,13 @@ from .kml_parser import (
     export_fields_to_kmz,
 )
 from .crop_settings import get_user_crops
+from rotation_planner.common import (
+    format_alert,
+    format_success,
+    format_error,
+    format_warning,
+    format_info,
+)
 
 
 # =============================================================================
@@ -170,15 +177,15 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
 
     user_id = get_user_id_from_state(user_state)
     if not user_id:
-        return pd.DataFrame(), "ログインしてください", "[]", ""
+        return pd.DataFrame(), format_error("ログインしてください"), "[]", ""
 
     if not kml_coords_json or kml_coords_json == "[]":
-        return fields_to_dataframe(get_user_fields(user_id)), "インポートするデータがありません", "[]", ""
+        return fields_to_dataframe(get_user_fields(user_id)), format_warning("インポートするデータがありません"), "[]", ""
 
     try:
         kml_fields = json.loads(kml_coords_json)
     except json.JSONDecodeError:
-        return fields_to_dataframe(get_user_fields(user_id)), "データの読み込みに失敗しました", "[]", ""
+        return fields_to_dataframe(get_user_fields(user_id)), format_error("データの読み込みに失敗しました"), "[]", ""
 
     registered = 0
     errors = []
@@ -205,9 +212,9 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
     next_id = get_next_field_id(user_id)
 
     if errors:
-        message = f"✅ {registered}件登録、⚠️ {len(errors)}件エラー\n" + "\n".join(errors[:3])
+        message = format_warning(f"✅ {registered}件登録、⚠️ {len(errors)}件エラー<br>" + "<br>".join(errors[:3]))
     else:
-        message = f"✅ {registered}件のほ場を登録しました"
+        message = format_success(f"✅ {registered}件のほ場を登録しました")
 
     return fields_to_dataframe(fields), message, fields_json_str, next_id
 
@@ -486,7 +493,7 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
     # 隠しフィールド（地図更新用）
     fields_json = gr.Textbox(visible=False, value="[]")
 
-    message_box = gr.Textbox(label="メッセージ", interactive=False)
+    message_box = gr.HTML("")
 
     gr.Markdown("## 📥 エクスポート")
 

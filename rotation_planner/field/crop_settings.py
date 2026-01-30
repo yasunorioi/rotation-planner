@@ -18,7 +18,15 @@ import gradio as gr
 import pandas as pd
 from typing import Dict, Any, List, Tuple
 
-from rotation_planner.common import CropMasterRepository, UserCropRepository
+from rotation_planner.common import (
+    CropMasterRepository,
+    UserCropRepository,
+    format_alert,
+    format_success,
+    format_error,
+    format_warning,
+    format_info,
+)
 
 
 # =============================================================================
@@ -47,30 +55,6 @@ def get_user_crops(user_id: int) -> List[Dict[str, Any]]:
 # =============================================================================
 # UI操作関数
 # =============================================================================
-
-def _format_alert(message: str, alert_type: str = "info") -> str:
-    """アラートバナー用のHTMLを生成"""
-    colors = {
-        "success": ("#d4edda", "#155724", "#c3e6cb"),  # 緑
-        "error": ("#f8d7da", "#721c24", "#f5c6cb"),    # 赤
-        "warning": ("#fff3cd", "#856404", "#ffeeba"),  # 黄
-        "info": ("#d1ecf1", "#0c5460", "#bee5eb"),     # 青
-    }
-    bg, text, border = colors.get(alert_type, colors["info"])
-
-    return f"""
-    <div style="
-        background: {bg};
-        color: {text};
-        border: 1px solid {border};
-        padding: 12px 20px;
-        border-radius: 6px;
-        font-size: 1.1em;
-        font-weight: 500;
-        margin: 10px 0;
-    ">{message}</div>
-    """
-
 
 def load_crop_settings(user_state: Dict[str, Any]) -> Tuple[List[str], pd.DataFrame, str]:
     """
@@ -103,9 +87,9 @@ def load_crop_settings(user_state: Dict[str, Any]) -> Tuple[List[str], pd.DataFr
 
     total = len(master_crops) + len(custom_crops)
     if total > 0:
-        msg = _format_alert(f"✅ {total}種類の作物が設定されています（マスタ: {len(master_crops)}, カスタム: {len(custom_crops)}）", "info")
+        msg = format_alert(f"✅ {total}種類の作物が設定されています（マスタ: {len(master_crops)}, カスタム: {len(custom_crops)}）", "info")
     else:
-        msg = _format_alert("作物を選択してください（ほ場登録時に使用します）", "info")
+        msg = format_alert("作物を選択してください（ほ場登録時に使用します）", "info")
 
     return master_crops, custom_df, msg
 
@@ -123,7 +107,7 @@ def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> 
     """
     user_id = user_state.get("user_id") if user_state else None
     if not user_id:
-        return _format_alert("エラー: ログインしてください", "error")
+        return format_alert("エラー: ログインしてください", "error")
 
     # 作物名からIDに変換
     all_crops = get_all_crops()
@@ -137,7 +121,7 @@ def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> 
     # 保存（カスタム作物は削除しない）
     UserCropRepository.set_user_crops(user_id, crop_ids)
 
-    return _format_alert(f"✅ マスタから{len(crop_ids)}種類の作物を設定しました", "success")
+    return format_alert(f"✅ マスタから{len(crop_ids)}種類の作物を設定しました", "success")
 
 
 def add_custom_crop(
@@ -159,13 +143,13 @@ def add_custom_crop(
     user_id = user_state.get("user_id") if user_state else None
 
     if not user_id:
-        return pd.DataFrame(columns=["ID", "作物名", "親作物"]), _format_alert("エラー: ログインしてください", "error")
+        return pd.DataFrame(columns=["ID", "作物名", "親作物"]), format_alert("エラー: ログインしてください", "error")
 
     if not parent_crop_name:
-        return _get_custom_crops_df(user_id), _format_alert("エラー: 親作物を選択してください", "warning")
+        return _get_custom_crops_df(user_id), format_alert("エラー: 親作物を選択してください", "warning")
 
     if not custom_name or not custom_name.strip():
-        return _get_custom_crops_df(user_id), _format_alert("エラー: カスタム名を入力してください", "warning")
+        return _get_custom_crops_df(user_id), format_alert("エラー: カスタム名を入力してください", "warning")
 
     custom_name = custom_name.strip()
 
@@ -173,14 +157,14 @@ def add_custom_crop(
     all_crops = get_all_crops()
     parent_crop = next((c for c in all_crops if c["name"] == parent_crop_name), None)
     if not parent_crop:
-        return _get_custom_crops_df(user_id), _format_alert(f"エラー: 親作物 '{parent_crop_name}' が見つかりません", "error")
+        return _get_custom_crops_df(user_id), format_alert(f"エラー: 親作物 '{parent_crop_name}' が見つかりません", "error")
 
     # 追加
     try:
         UserCropRepository.add_user_crop(user_id, parent_crop["id"], custom_name)
-        return _get_custom_crops_df(user_id), _format_alert(f"✅ '{custom_name}' を追加しました（親: {parent_crop_name}）", "success")
+        return _get_custom_crops_df(user_id), format_alert(f"✅ '{custom_name}' を追加しました（親: {parent_crop_name}）", "success")
     except Exception as e:
-        return _get_custom_crops_df(user_id), _format_alert(f"エラー: {str(e)}", "error")
+        return _get_custom_crops_df(user_id), format_alert(f"エラー: {str(e)}", "error")
 
 
 def delete_custom_crop(
@@ -200,10 +184,10 @@ def delete_custom_crop(
     user_id = user_state.get("user_id") if user_state else None
 
     if not user_id:
-        return pd.DataFrame(columns=["ID", "作物名", "親作物"]), _format_alert("エラー: ログインしてください", "error")
+        return pd.DataFrame(columns=["ID", "作物名", "親作物"]), format_alert("エラー: ログインしてください", "error")
 
     if not selected_rows or len(selected_rows) == 0:
-        return _get_custom_crops_df(user_id), _format_alert("削除する作物を選択してください", "warning")
+        return _get_custom_crops_df(user_id), format_alert("削除する作物を選択してください", "warning")
 
     deleted = 0
     for row in selected_rows:
@@ -215,7 +199,7 @@ def delete_custom_crop(
             except Exception:
                 pass
 
-    return _get_custom_crops_df(user_id), _format_alert(f"✅ {deleted}件のカスタム作物を削除しました", "success")
+    return _get_custom_crops_df(user_id), format_alert(f"✅ {deleted}件のカスタム作物を削除しました", "success")
 
 
 def _get_custom_crops_df(user_id: int) -> pd.DataFrame:

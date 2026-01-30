@@ -18,7 +18,15 @@ import pandas as pd
 from typing import List, Dict, Optional, Tuple, Any
 
 # DB関連
-from rotation_planner.common import FieldRepository, CropHistoryRepository, UserRepository
+from rotation_planner.common import (
+    FieldRepository,
+    CropHistoryRepository,
+    UserRepository,
+    format_alert,
+    format_success,
+    format_error,
+    format_warning,
+)
 
 # 同一パッケージの地図モジュール
 from .map import calculate_area_from_coords, m2_to_ha
@@ -193,36 +201,36 @@ def register_field_with_state(
     """
     user_id = get_user_id_from_state(user_state)
     if not user_id:
-        return pd.DataFrame(), "エラー: ログインが必要です", "[]", ""
+        return pd.DataFrame(), format_error("エラー: ログインが必要です"), "[]", ""
 
     # 入力検証
     if not field_id.strip():
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)
-        return fields_to_dataframe(fields), "エラー: ほ場IDを入力してください", get_fields_json_for_map(fields), next_id
+        return fields_to_dataframe(fields), format_warning("エラー: ほ場IDを入力してください"), get_fields_json_for_map(fields), next_id
 
     if not coords_json.strip():
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)
-        return fields_to_dataframe(fields), "エラー: 地図上でポリゴンを描画してください", get_fields_json_for_map(fields), next_id
+        return fields_to_dataframe(fields), format_warning("エラー: 地図上でポリゴンを描画してください"), get_fields_json_for_map(fields), next_id
 
     try:
         coordinates = json.loads(coords_json)
         if len(coordinates) < 3:
             fields = get_user_fields(user_id)
             next_id = get_next_field_id(user_id)
-            return fields_to_dataframe(fields), "エラー: 3点以上の頂点が必要です", get_fields_json_for_map(fields), next_id
+            return fields_to_dataframe(fields), format_warning("エラー: 3点以上の頂点が必要です"), get_fields_json_for_map(fields), next_id
     except json.JSONDecodeError:
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)
-        return fields_to_dataframe(fields), "エラー: 座標データが不正です", get_fields_json_for_map(fields), next_id
+        return fields_to_dataframe(fields), format_error("エラー: 座標データが不正です"), get_fields_json_for_map(fields), next_id
 
     # 重複チェック
     existing = FieldRepository.get_field_by_code(user_id, field_id.strip())
     if existing:
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)
-        return fields_to_dataframe(fields), f"エラー: ほ場ID '{field_id}' は既に登録されています", get_fields_json_for_map(fields), next_id
+        return fields_to_dataframe(fields), format_warning(f"エラー: ほ場ID '{field_id}' は既に登録されています"), get_fields_json_for_map(fields), next_id
 
     # 面積計算
     area_m2 = calculate_area_from_coords(coordinates)
@@ -241,7 +249,7 @@ def register_field_with_state(
     # DB登録
     try:
         new_field_db_id = FieldRepository.create_field(user_id, field_data)
-        message = f"ほ場 '{field_id}' を登録しました（{area_ha:.4f} ha / {area_ha * 100:.2f} a）"
+        message = f"✅ ほ場 '{field_id}' を登録しました（{area_ha:.4f} ha / {area_ha * 100:.2f} a）"
 
         # 作物が設定されていれば、作付履歴にも登録
         if crop and crop not in ("", "（未設定）"):
@@ -261,11 +269,11 @@ def register_field_with_state(
     except Exception as e:
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)
-        return fields_to_dataframe(fields), f"エラー: 登録に失敗しました - {str(e)}", get_fields_json_for_map(fields), next_id
+        return fields_to_dataframe(fields), format_error(f"エラー: 登録に失敗しました - {str(e)}"), get_fields_json_for_map(fields), next_id
 
     fields = get_user_fields(user_id)
     next_id = get_next_field_id(user_id)
-    return fields_to_dataframe(fields), message, get_fields_json_for_map(fields), next_id
+    return fields_to_dataframe(fields), format_success(message), get_fields_json_for_map(fields), next_id
 
 
 def delete_field_with_state(field_id: str, user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str]:
@@ -281,27 +289,27 @@ def delete_field_with_state(field_id: str, user_state: Dict[str, Any]) -> Tuple[
     """
     user_id = get_user_id_from_state(user_state)
     if not user_id:
-        return pd.DataFrame(), "エラー: ログインが必要です", "[]"
+        return pd.DataFrame(), format_error("エラー: ログインが必要です"), "[]"
 
     if not field_id.strip():
         fields = get_user_fields(user_id)
-        return fields_to_dataframe(fields), "エラー: 削除するほ場IDを入力してください", get_fields_json_for_map(fields)
+        return fields_to_dataframe(fields), format_warning("エラー: 削除するほ場IDを入力してください"), get_fields_json_for_map(fields)
 
     # ほ場コードで検索
     field = FieldRepository.get_field_by_code(user_id, field_id.strip())
     if not field:
         fields = get_user_fields(user_id)
-        return fields_to_dataframe(fields), f"エラー: ほ場 '{field_id}' が見つかりません", get_fields_json_for_map(fields)
+        return fields_to_dataframe(fields), format_warning(f"エラー: ほ場 '{field_id}' が見つかりません"), get_fields_json_for_map(fields)
 
     # 削除
     try:
         if FieldRepository.delete_field(field["id"]):
-            message = f"ほ場 '{field_id}' を削除しました"
+            message = format_success(f"✅ ほ場 '{field_id}' を削除しました")
         else:
-            message = f"エラー: ほ場 '{field_id}' の削除に失敗しました"
+            message = format_error(f"エラー: ほ場 '{field_id}' の削除に失敗しました")
     except Exception as e:
         fields = get_user_fields(user_id)
-        return fields_to_dataframe(fields), f"エラー: 削除に失敗しました - {str(e)}", get_fields_json_for_map(fields)
+        return fields_to_dataframe(fields), format_error(f"エラー: 削除に失敗しました - {str(e)}"), get_fields_json_for_map(fields)
 
     fields = get_user_fields(user_id)
     return fields_to_dataframe(fields), message, get_fields_json_for_map(fields)

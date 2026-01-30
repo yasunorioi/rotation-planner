@@ -100,6 +100,15 @@ from rotation_planner.common.export import (
     get_accessible_user_ids,
 )
 
+# UIユーティリティ
+from rotation_planner.common.ui_utils import (
+    format_alert,
+    format_success,
+    format_error,
+    format_warning,
+    format_info,
+)
+
 __all__ = [
     # ロール定数
     "ROLE_ADMIN",
@@ -157,4 +166,10 @@ __all__ = [
     "create_csv_export_ui",
     "can_access_all_data",
     "get_accessible_user_ids",
+    # UIユーティリティ
+    "format_alert",
+    "format_success",
+    "format_error",
+    "format_warning",
+    "format_info",
 ]

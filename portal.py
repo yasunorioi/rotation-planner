@@ -537,9 +537,9 @@ if (DEBUG) console.log('[PORTAL] Debug mode ON');
 if __name__ == "__main__":
     app = create_app()
     import os
-    # HF Spaces環境では server_name/port を指定しない
+    # HF Spaces環境では認証なし・SSRなしで起動
     if os.environ.get("SPACE_ID"):
-        app.launch(auth=authenticate, ssr_mode=False)
+        app.launch(ssr_mode=False)
     else:
         app.launch(
             server_name="0.0.0.0",

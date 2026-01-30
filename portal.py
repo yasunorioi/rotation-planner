@@ -496,13 +496,12 @@ def create_app():
             return load_initial_data(user_state_dict)
 
         # 作物設定タブの初期化
-        def init_crop_settings_tab(request: gr.Request):
+        def init_crop_settings_tab(user_state_dict):
             """作物設定タブの初期化"""
-            user_state_dict = get_user_state_from_request(request)
             print(f"[DEBUG] init_crop_settings_tab called: user_state_dict={user_state_dict}")
             if not user_state_dict or not user_state_dict.get("user_id"):
                 import pandas as pd
-                print(f"[DEBUG] init_crop_settings_tab: No user_id, returning login message")
+                print(f"[DEBUG] init_crop_settings_tab: No user_id, returning empty")
                 return [], pd.DataFrame(columns=["ID", "作物名", "親作物"]), ""
 
             from rotation_planner.field import load_crop_settings
@@ -530,7 +529,7 @@ def create_app():
             ]
         ).then(
             fn=init_crop_settings_tab,
-            inputs=[],
+            inputs=[user_state],
             outputs=[
                 crop_settings_components["crop_checkboxes"],
                 crop_settings_components["custom_crops_table"],

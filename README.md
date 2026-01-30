@@ -1,16 +1,3 @@
----
-title: 輪作計画メーカー
-emoji: 🌾
-colorFrom: green
-colorTo: yellow
-sdk: gradio
-sdk_version: 5.11.0
-python_version: "3.10"
-app_file: demo/app.py
-pinned: false
-license: mit
----
-
 # 農業管理アプリ
 
 北海道畑作農家向けの農業管理アプリ群です。
@@ -24,23 +11,166 @@ license: mit
 | 農薬発注アプリ | pesticide_order.py | 7861 | 輪作計画から年間の農薬必要量を算出 |
 | ほ場登録アプリ | field_register.py | 7862 | 地図上でほ場を登録しCSV出力 |
 
-## 起動方法
+## ローカル起動方法
 
 ```bash
-cd /home/yasu/multi-agent-shogun/docs/rotation_planner_ui
-source .venv/bin/activate
+cd /path/to/rotation_planner_ui
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-# 輪作計画メーカー
-python app.py  # http://127.0.0.1:7860
-
-# 農薬発注アプリ
-python pesticide_order.py  # http://127.0.0.1:7861
-
-# ほ場登録アプリ
-python field_register.py  # http://127.0.0.1:7862
-
-# 統合ポータル（全アプリへのランチャー）
+# 統合ポータル（推奨）
 python portal.py  # http://127.0.0.1:7863
+```
+
+## サーバーデプロイ（VPS）
+
+Debian/Ubuntu VPSへのデプロイ手順。
+
+### 動作確認済み環境
+
+- Debian 12 (bookworm)
+- Python 3.11
+- メモリ 512MB以上
+
+### 1. 必要パッケージのインストール
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git python3 python3-pip python3-venv nginx
+```
+
+### 2. アプリ用ユーザーとディレクトリ作成
+
+```bash
+sudo useradd -m -s /bin/bash webapp
+sudo mkdir -p /var/www/rotation-planner
+sudo chown webapp:webapp /var/www/rotation-planner
+```
+
+### 3. リポジトリをクローン
+
+```bash
+# パブリックリポジトリの場合
+sudo -u webapp git clone https://github.com/YOUR_USER/rotation-planner.git /var/www/rotation-planner/app
+
+# プライベートリポジトリの場合（Personal Access Token使用）
+sudo -u webapp git clone https://YOUR_TOKEN@github.com/YOUR_USER/rotation-planner.git /var/www/rotation-planner/app
+```
+
+### 4. Python仮想環境と依存関係
+
+```bash
+sudo -u webapp bash -c "cd /var/www/rotation-planner/app && python3 -m venv venv && source venv/bin/activate && pip install gradio pandas numpy ortools requests shapely pyproj"
+```
+
+### 5. データベース初期化
+
+```bash
+sudo -u webapp bash -c "cd /var/www/rotation-planner/app && source venv/bin/activate && python -c 'from rotation_planner.common import init_db; init_db()'"
+```
+
+### 6. 初期ユーザー作成
+
+```bash
+# パスワードのハッシュ値を生成
+echo -n "YOUR_PASSWORD" | sha256sum
+
+# users.jsonを作成
+sudo -u webapp mkdir -p /var/www/rotation-planner/app/data
+sudo -u webapp tee /var/www/rotation-planner/app/data/users.json << 'EOF'
+{
+  "version": "1.0",
+  "updated_at": "2026-01-31T00:00:00",
+  "users": [
+    {
+      "username": "admin",
+      "password_hash": "ここにsha256ハッシュ値を入れる",
+      "role": "admin",
+      "farmer_id": null,
+      "display_name": "管理者"
+    }
+  ]
+}
+EOF
+```
+
+### 7. systemdサービス設定
+
+```bash
+sudo tee /etc/systemd/system/rotation-planner.service << 'EOF'
+[Unit]
+Description=Rotation Planner Gradio App
+After=network.target
+
+[Service]
+Type=simple
+User=webapp
+WorkingDirectory=/var/www/rotation-planner/app
+ExecStart=/var/www/rotation-planner/app/venv/bin/python portal.py
+Restart=always
+RestartSec=3
+Environment=GRADIO_SERVER_NAME=127.0.0.1
+Environment=GRADIO_SERVER_PORT=7863
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable rotation-planner
+sudo systemctl start rotation-planner
+```
+
+### 8. nginx設定
+
+```bash
+sudo tee /etc/nginx/sites-available/rotation-planner << 'EOF'
+server {
+    listen 80;
+    server_name YOUR_DOMAIN_OR_IP;
+
+    location / {
+        proxy_pass http://127.0.0.1:7863;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/rotation-planner /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+### 9. HTTPS化（オプション）
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d YOUR_DOMAIN
+```
+
+## 運用コマンド
+
+```bash
+# サービス状態確認
+sudo systemctl status rotation-planner
+
+# ログ確認
+sudo journalctl -u rotation-planner -f
+
+# 再起動
+sudo systemctl restart rotation-planner
+
+# コード更新
+sudo -u webapp bash -c "cd /var/www/rotation-planner/app && git pull"
+sudo systemctl restart rotation-planner
 ```
 
 ## 1. 輪作計画メーカー
@@ -121,17 +251,21 @@ python portal.py  # http://127.0.0.1:7863
 
 ```
 rotation_planner_ui/
-├── portal.py                   # 統合ポータル（ランチャー）
+├── portal.py                   # 統合ポータル（メインエントリポイント）
 ├── app.py                      # 輪作計画メーカー
 ├── pesticide_order.py          # 農薬発注アプリ
 ├── field_register.py           # ほ場登録アプリ
-├── pesticide_master.csv        # 防除マスタ（使用中）
-├── pesticide_template.csv      # 防除マスタテンプレート
-├── inventory_template.csv      # 在庫テンプレート
-├── template_example.csv        # 輪作計画テンプレート（サンプル付き）
-├── template_empty.csv          # 輪作計画テンプレート（空）
-├── 作付け履歴_converted.csv    # 変換済み作付データ
-├── 202601221419.pdf            # JAマニュアル（参考資料）
+├── auth.py                     # 認証モジュール
+├── db_access.py                # データベースアクセス
+├── db_schema.sql               # DBスキーマ定義
+├── rotation_planner/           # リファクタリング済みパッケージ
+│   ├── field/                  # ほ場登録関連
+│   ├── app/                    # 輪作計画関連
+│   ├── pesticide/              # 農薬発注関連
+│   └── common/                 # 共通モジュール
+├── data/                       # データディレクトリ
+│   └── users.json              # ユーザーマスタ
+├── pesticide_master.csv        # 防除マスタ
 ├── requirements.txt            # 依存ライブラリ
 └── README.md                   # このファイル
 ```

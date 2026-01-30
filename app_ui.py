@@ -25,7 +25,7 @@ from rotation_planner.app import (
 )
 
 # 認証モジュール（ユーザー情報表示用）
-from auth import get_user_info
+from rotation_planner.common import get_user_info
 
 # アプリのパス
 APP_DIR = os.path.dirname(os.path.abspath(__file__))

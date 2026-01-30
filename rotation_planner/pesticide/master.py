@@ -11,7 +11,7 @@ from typing import Optional
 
 # DBアクセス
 try:
-    from db_access import PesticideMasterRepository
+    from rotation_planner.common import PesticideMasterRepository
 except ImportError:
     PesticideMasterRepository = None
 

@@ -10,8 +10,11 @@ from typing import Optional, Dict, Any
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
 # 認証・DBアクセス
-from auth import authenticate, get_user_info, is_admin_role, ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER
-from db_access import FieldRepository, PlanRepository, JAStaffRepository, UserRepository
+from rotation_planner.common import (
+    authenticate, get_user_info, is_admin_role,
+    ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER,
+    FieldRepository, PlanRepository, JAStaffRepository, UserRepository,
+)
 
 # UIモジュール
 from app_ui import create_rotation_planner_ui

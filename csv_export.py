@@ -21,15 +21,16 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 # DB・認証モジュール
-from db_access import (
+from rotation_planner.common import (
     PlanRepository,
     FieldRepository,
     JAStaffRepository,
     UserRepository,
     get_db,
-    rows_to_list
+    rows_to_list,
+    get_user_info,
+    is_admin_role,
 )
-from auth import get_user_info, is_admin_role
 
 # =============================================================================
 # 定数

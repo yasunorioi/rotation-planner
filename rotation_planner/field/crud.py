@@ -18,7 +18,7 @@ import pandas as pd
 from typing import List, Dict, Optional, Tuple, Any
 
 # DB関連
-from db_access import FieldRepository, CropHistoryRepository, UserRepository
+from rotation_planner.common import FieldRepository, CropHistoryRepository, UserRepository
 
 # 同一パッケージの地図モジュール
 from .map import calculate_area_from_coords, m2_to_ha

@@ -300,7 +300,7 @@ def create_pesticide_order_ui(user_state: gr.State) -> None:
 # =============================================================================
 
 if __name__ == "__main__":
-    from auth import authenticate, get_user_info
+    from rotation_planner.common import authenticate, get_user_info
 
     with gr.Blocks(title="農薬発注アプリ（単独起動）") as demo:
         user_state = gr.State({})

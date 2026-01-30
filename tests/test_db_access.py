@@ -12,8 +12,8 @@ from pathlib import Path
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import db_access
-from db_access import (
+from rotation_planner.common import db_access
+from rotation_planner.common import (
     FieldRepository,
     PlanRepository,
     UserRepository,

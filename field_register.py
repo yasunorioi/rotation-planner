@@ -12,8 +12,10 @@ import gradio as gr
 import pandas as pd
 
 # 認証・DBモジュール
-from auth import authenticate, get_user_info
-from db_access import FieldRepository, CropHistoryRepository, UserRepository
+from rotation_planner.common import (
+    authenticate, get_user_info,
+    FieldRepository, CropHistoryRepository, UserRepository,
+)
 
 # 新モジュールから全てインポート
 from rotation_planner.field import (

@@ -12,11 +12,11 @@ from datetime import datetime
 # プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).parent))
 
-from db_access import (
+from rotation_planner.common import (
     get_db,
     UserRepository,
     FieldRepository,
-    MigrationUtils
+    MigrationUtils,
 )
 
 

@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 
-from auth import load_users, save_users, hash_password, ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER
+from rotation_planner.common import (
+    load_users, save_users, hash_password,
+    ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER,
+)
 
 # =============================================================================
 # 定数

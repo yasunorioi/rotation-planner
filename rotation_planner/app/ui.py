@@ -55,7 +55,7 @@ def create_app(auth_enabled: bool = False, auth_func=None):
         def on_load(request: gr.Request):
             if auth_enabled and request and hasattr(request, 'username') and request.username:
                 try:
-                    from auth import get_user_info
+                    from rotation_planner.common import get_user_info
                     user = get_user_info(request.username)
                     if user:
                         role_label = {

@@ -107,7 +107,7 @@ __all__ = [
 
 if __name__ == "__main__":
     import gradio as gr
-    from auth import authenticate
+    from rotation_planner.common import authenticate
 
     with gr.Blocks(title="ほ場登録アプリ（テスト）") as demo:
         gr.Markdown("# 🗺️ ほ場登録アプリ（UIモジュールテスト）")

@@ -24,7 +24,7 @@ from .master import (
 
 # DBアクセス
 try:
-    from db_access import UserRepository
+    from rotation_planner.common import UserRepository
 except ImportError:
     UserRepository = None
 
@@ -263,7 +263,7 @@ def create_pesticide_order_ui(user_state: gr.State) -> Dict[str, Any]:
 if __name__ == "__main__":
     # 認証モジュール（単独起動時のみ使用）
     try:
-        from auth import authenticate, get_user_info
+        from rotation_planner.common import authenticate, get_user_info
     except ImportError:
         authenticate = None
         get_user_info = None

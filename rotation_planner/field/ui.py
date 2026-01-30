@@ -36,7 +36,12 @@ from .crud import (
     get_field_history_with_state,
     export_csv_with_state,
 )
-from .kml_parser import parse_kml_or_kmz_bytes, fields_to_dataframe_format
+from .kml_parser import (
+    parse_kml_or_kmz_bytes,
+    fields_to_dataframe_format,
+    export_fields_to_kml,
+    export_fields_to_kmz,
+)
 
 
 # =============================================================================
@@ -204,6 +209,66 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
         message = f"✅ {registered}件のほ場を登録しました"
 
     return fields_to_dataframe(fields), message, fields_json_str, next_id
+
+
+# =============================================================================
+# KML/KMZエクスポート機能
+# =============================================================================
+
+def export_kml_with_state(user_state: Dict[str, Any], format_type: str = "kml") -> Tuple[str, str]:
+    """
+    ほ場をKML/KMZファイルとしてエクスポート
+
+    Args:
+        user_state: ユーザー状態
+        format_type: "kml" または "kmz"
+
+    Returns:
+        (ファイルパス, メッセージ)
+    """
+    import json
+
+    user_id = get_user_id_from_state(user_state)
+    if not user_id:
+        return None, "ログインしてください"
+
+    fields = get_user_fields(user_id)
+    if not fields:
+        return None, "エクスポートするほ場がありません"
+
+    # DBのほ場データをKMLエクスポート形式に変換
+    export_fields = []
+    for f in fields:
+        coords = f.get("coordinates_json", "[]")
+        if isinstance(coords, str):
+            try:
+                coords = json.loads(coords)
+            except json.JSONDecodeError:
+                continue
+
+        if coords and len(coords) >= 3:
+            export_fields.append({
+                "field_id": f.get("field_code", ""),
+                "name": f.get("name", f.get("field_code", "")),
+                "coordinates": coords,
+                "area_ha": f.get("area_ha", 0),
+                "crop": "",  # 作物情報は今後追加
+            })
+
+    if not export_fields:
+        return None, "エクスポート可能なほ場がありません"
+
+    # ユーザー名を取得してファイル名に使用
+    username = user_state.get("username", "user")
+
+    if format_type == "kmz":
+        output_path = f"/tmp/fields_{username}.kmz"
+        export_fields_to_kmz(export_fields, output_path, f"{username}のほ場一覧")
+    else:
+        output_path = f"/tmp/fields_{username}.kml"
+        export_fields_to_kml(export_fields, output_path, f"{username}のほ場一覧")
+
+    return output_path, f"✅ {len(export_fields)}件のほ場を{format_type.upper()}でエクスポートしました"
 
 
 def load_initial_data(user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
@@ -381,12 +446,14 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
 
     message_box = gr.Textbox(label="メッセージ", interactive=False)
 
-    gr.Markdown("## 📥 CSV出力")
+    gr.Markdown("## 📥 エクスポート")
 
     with gr.Row():
-        export_btn = gr.Button("📥 CSVダウンロード", variant="primary")
-        csv_file = gr.File(label="ダウンロード")
+        export_btn = gr.Button("📥 CSV", variant="primary")
+        export_kml_btn = gr.Button("📥 KML", variant="secondary")
+        export_kmz_btn = gr.Button("📥 KMZ", variant="secondary")
 
+    export_file = gr.File(label="ダウンロード")
     export_message = gr.Textbox(label="出力結果", interactive=False)
 
     # イベントハンドラ
@@ -433,7 +500,19 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
     export_btn.click(
         fn=export_csv_with_state,
         inputs=[user_state],
-        outputs=[csv_file, export_message]
+        outputs=[export_file, export_message]
+    )
+
+    export_kml_btn.click(
+        fn=lambda s: export_kml_with_state(s, "kml"),
+        inputs=[user_state],
+        outputs=[export_file, export_message]
+    )
+
+    export_kmz_btn.click(
+        fn=lambda s: export_kml_with_state(s, "kmz"),
+        inputs=[user_state],
+        outputs=[export_file, export_message]
     )
 
     history_btn.click(
@@ -482,4 +561,5 @@ __all__ = [
     "load_initial_data",
     "process_kml_upload",
     "register_kml_fields",
+    "export_kml_with_state",
 ]

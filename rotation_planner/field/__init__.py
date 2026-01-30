@@ -81,14 +81,19 @@ from .ui import (
     load_initial_data,
 )
 
-# KML/KMZパーサーモジュール
+# KML/KMZパーサー・エクスポートモジュール
 from .kml_parser import (
+    # インポート
     parse_kml_content,
     parse_kml_file,
     parse_kmz_file,
     parse_kml_or_kmz,
     parse_kml_or_kmz_bytes,
     fields_to_dataframe_format,
+    # エクスポート
+    generate_kml_content,
+    export_fields_to_kml,
+    export_fields_to_kmz,
 )
 
 # 筆ポリゴンモジュール

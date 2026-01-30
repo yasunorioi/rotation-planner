@@ -321,6 +321,166 @@ def parse_kml_or_kmz_bytes(file_bytes: bytes, filename: str) -> List[Dict[str, A
 
 
 # =============================================================================
+# KMLエクスポート
+# =============================================================================
+
+def generate_kml_content(fields: List[Dict[str, Any]], name: str = "ほ場一覧") -> str:
+    """
+    ほ場リストからKML文字列を生成
+
+    Args:
+        fields: ほ場情報のリスト
+            各ほ場は以下のキーを持つ:
+            - field_id: ほ場ID
+            - name: ほ場名
+            - coordinates: [[lat, lng], ...] または JSON文字列
+            - area_ha: 面積（ha）（任意）
+            - crop: 作物名（任意）
+        name: KMLドキュメント名
+
+    Returns:
+        KML形式の文字列
+    """
+    import json
+
+    kml_parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<kml xmlns="http://www.opengis.net/kml/2.2">',
+        '  <Document>',
+        f'    <name>{_escape_xml(name)}</name>',
+        '    <Style id="fieldStyle">',
+        '      <LineStyle>',
+        '        <color>ff0000ff</color>',
+        '        <width>2</width>',
+        '      </LineStyle>',
+        '      <PolyStyle>',
+        '        <color>4d00ff00</color>',
+        '      </PolyStyle>',
+        '    </Style>',
+    ]
+
+    for field in fields:
+        # 座標を取得
+        coords = field.get("coordinates", [])
+        if isinstance(coords, str):
+            try:
+                coords = json.loads(coords)
+            except json.JSONDecodeError:
+                continue
+
+        if not coords or len(coords) < 3:
+            continue
+
+        # ほ場情報
+        field_id = field.get("field_id", field.get("ほ場ID", ""))
+        field_name = field.get("name", field.get("ほ場名", field_id))
+        area_ha = field.get("area_ha", field.get("面積(ha)", ""))
+        crop = field.get("crop", field.get("作物", ""))
+
+        # 説明文を生成
+        description_parts = []
+        if field_id:
+            description_parts.append(f"ほ場ID: {field_id}")
+        if area_ha:
+            description_parts.append(f"面積: {area_ha} ha")
+        if crop:
+            description_parts.append(f"作物: {crop}")
+        description = "\n".join(description_parts)
+
+        # 座標を KML形式に変換 (経度,緯度,高度)
+        coord_strings = []
+        for coord in coords:
+            lat = coord[0] if isinstance(coord, list) else coord.get("lat", 0)
+            lng = coord[1] if isinstance(coord, list) else coord.get("lng", 0)
+            coord_strings.append(f"              {lng},{lat},0")
+
+        # ポリゴンを閉じる
+        if coords[0] != coords[-1]:
+            first = coords[0]
+            lat = first[0] if isinstance(first, list) else first.get("lat", 0)
+            lng = first[1] if isinstance(first, list) else first.get("lng", 0)
+            coord_strings.append(f"              {lng},{lat},0")
+
+        coordinates_str = "\n".join(coord_strings)
+
+        placemark = f'''    <Placemark>
+      <name>{_escape_xml(field_name)}</name>
+      <description>{_escape_xml(description)}</description>
+      <styleUrl>#fieldStyle</styleUrl>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+{coordinates_str}
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>'''
+
+        kml_parts.append(placemark)
+
+    kml_parts.extend([
+        '  </Document>',
+        '</kml>',
+    ])
+
+    return '\n'.join(kml_parts)
+
+
+def _escape_xml(text: str) -> str:
+    """XML特殊文字をエスケープ"""
+    if not text:
+        return ""
+    return (str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;"))
+
+
+def export_fields_to_kml(fields: List[Dict[str, Any]], output_path: str, name: str = "ほ場一覧") -> str:
+    """
+    ほ場リストをKMLファイルとして保存
+
+    Args:
+        fields: ほ場情報のリスト
+        output_path: 出力ファイルパス
+        name: KMLドキュメント名
+
+    Returns:
+        保存したファイルパス
+    """
+    kml_content = generate_kml_content(fields, name)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(kml_content)
+
+    return output_path
+
+
+def export_fields_to_kmz(fields: List[Dict[str, Any]], output_path: str, name: str = "ほ場一覧") -> str:
+    """
+    ほ場リストをKMZファイルとして保存
+
+    Args:
+        fields: ほ場情報のリスト
+        output_path: 出力ファイルパス
+        name: KMLドキュメント名
+
+    Returns:
+        保存したファイルパス
+    """
+    kml_content = generate_kml_content(fields, name)
+
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('doc.kml', kml_content.encode('utf-8'))
+
+    return output_path
+
+
+# =============================================================================
 # ユーティリティ
 # =============================================================================
 

@@ -174,7 +174,7 @@ def get_user_state_from_request(request: gr.Request) -> Dict[str, Any]:
 def create_app():
     """統合Gradioアプリを作成"""
 
-    with gr.Blocks(title="農業管理アプリ 統合ポータル") as app:
+    with gr.Blocks(title="農業管理アプリ 統合ポータル", theme=gr.themes.Soft()) as app:
 
         # 状態管理
         user_state = gr.State({})
@@ -541,6 +541,5 @@ if __name__ == "__main__":
         server_port=7863,
         share=False,
         auth=authenticate,  # 認証を一元管理
-        theme=gr.themes.Soft(),  # Gradio 6.0: theme は launch() に移動
         head=CUSTOM_HEAD
     )

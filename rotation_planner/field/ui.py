@@ -339,6 +339,24 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
                 label="地図"
             )
 
+            # iframe からのpostMessageを受け取って座標入力欄に反映するスクリプト
+            gr.HTML("""
+            <script>
+            (function() {
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type === 'polygon_coordinates') {
+                        var coordsInput = document.querySelector('#coords_input textarea');
+                        if (coordsInput) {
+                            coordsInput.value = event.data.coordinates || '';
+                            // Gradioに変更を通知
+                            coordsInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                });
+            })();
+            </script>
+            """)
+
             gr.Markdown("""
             **使い方:**
             1. 右上の多角形ツール（六角形アイコン）をクリック

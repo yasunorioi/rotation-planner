@@ -1,3 +1,16 @@
+---
+title: 輪作計画メーカー
+emoji: 🌾
+colorFrom: green
+colorTo: yellow
+sdk: gradio
+sdk_version: 5.9.1
+python_version: "3.12"
+app_file: portal.py
+pinned: false
+license: mit
+---
+
 # 農業管理アプリ
 
 北海道畑作農家向けの農業管理アプリ群です。

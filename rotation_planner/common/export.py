@@ -301,7 +301,7 @@ def export_ja_aggregate_pesticide_csv(
 
     try:
         # 遅延インポート
-        from pesticide_order import get_aggregate_pesticide_orders
+        from rotation_planner.pesticide import get_aggregate_pesticide_orders
         org_id = user_state.get("org_id", 1)
         aggregate_data = get_aggregate_pesticide_orders(org_id)
 
@@ -319,7 +319,7 @@ def export_ja_aggregate_pesticide_csv(
         return filepath, f"JA集計CSVを出力しました（{len(aggregate_data)}件）"
 
     except ImportError:
-        return None, "エラー: pesticide_orderモジュールが見つかりません"
+        return None, "エラー: rotation_planner.pesticideモジュールが見つかりません"
     except Exception as e:
         return None, f"エラー: {str(e)}"
 

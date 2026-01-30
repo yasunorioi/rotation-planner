@@ -258,7 +258,7 @@ def create_app():
                 # 輪作計画UIを埋め込み
                 # Note: create_rotation_planner_ui は gr.Blocks を返すが、
                 # ここでは内部のUIが構築されることを期待
-                from app import (
+                from rotation_planner.app import (
                     DEFAULT_CROPS, DEFAULT_PREFERRED_TRANSITIONS, DEFAULT_MAIN_CROPS,
                     APP_DIR, build_constraints_table, update_constraints_table,
                     update_constraints_from_csv, run_optimization

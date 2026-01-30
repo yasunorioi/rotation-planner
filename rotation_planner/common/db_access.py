@@ -640,6 +640,165 @@ class PesticideMasterRepository:
 
 
 # =============================================================================
+# 作物マスタリポジトリ
+# =============================================================================
+
+class CropMasterRepository:
+    """作物マスタのCRUD操作（JA管理）"""
+
+    @staticmethod
+    def get_all(active_only: bool = True) -> List[Dict[str, Any]]:
+        """全作物を取得"""
+        with get_db() as conn:
+            if active_only:
+                cursor = conn.execute("""
+                    SELECT * FROM crop_master
+                    WHERE is_active = 1
+                    ORDER BY display_order, name
+                """)
+            else:
+                cursor = conn.execute("""
+                    SELECT * FROM crop_master
+                    ORDER BY display_order, name
+                """)
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def get_by_id(crop_id: int) -> Optional[Dict[str, Any]]:
+        """IDで作物を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM crop_master WHERE id = ?", (crop_id,)
+            )
+            return row_to_dict(cursor.fetchone())
+
+    @staticmethod
+    def get_by_name(name: str) -> Optional[Dict[str, Any]]:
+        """名前で作物を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM crop_master WHERE name = ?", (name,)
+            )
+            return row_to_dict(cursor.fetchone())
+
+    @staticmethod
+    def create(name: str, display_order: int = 0) -> int:
+        """作物を追加"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                INSERT INTO crop_master (name, display_order)
+                VALUES (?, ?)
+            """, (name, display_order))
+            conn.commit()
+            return cursor.lastrowid
+
+    @staticmethod
+    def update(crop_id: int, data: Dict[str, Any]) -> bool:
+        """作物を更新"""
+        with get_db() as conn:
+            fields = []
+            values = []
+            for key in ['name', 'display_order', 'is_active']:
+                if key in data:
+                    fields.append(f"{key} = ?")
+                    values.append(data[key])
+
+            if not fields:
+                return False
+
+            values.append(crop_id)
+            conn.execute(f"""
+                UPDATE crop_master SET {', '.join(fields)}
+                WHERE id = ?
+            """, values)
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete(crop_id: int) -> bool:
+        """作物を削除（非アクティブ化）"""
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE crop_master SET is_active = 0 WHERE id = ?",
+                (crop_id,)
+            )
+            conn.commit()
+            return True
+
+
+# =============================================================================
+# ユーザー作物リポジトリ
+# =============================================================================
+
+class UserCropRepository:
+    """ユーザーが選択した作物のCRUD操作"""
+
+    @staticmethod
+    def get_user_crops(user_id: int) -> List[Dict[str, Any]]:
+        """ユーザーの選択した作物を取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT cm.* FROM crop_master cm
+                INNER JOIN user_crops uc ON cm.id = uc.crop_id
+                WHERE uc.user_id = ? AND cm.is_active = 1
+                ORDER BY cm.display_order, cm.name
+            """, (user_id,))
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def get_user_crop_ids(user_id: int) -> List[int]:
+        """ユーザーの選択した作物IDリストを取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT crop_id FROM user_crops
+                WHERE user_id = ?
+            """, (user_id,))
+            return [row[0] for row in cursor.fetchall()]
+
+    @staticmethod
+    def set_user_crops(user_id: int, crop_ids: List[int]) -> bool:
+        """ユーザーの作物選択を設定（既存は全削除して再登録）"""
+        with get_db() as conn:
+            # 既存を削除
+            conn.execute("DELETE FROM user_crops WHERE user_id = ?", (user_id,))
+
+            # 新規登録
+            for crop_id in crop_ids:
+                conn.execute("""
+                    INSERT INTO user_crops (user_id, crop_id)
+                    VALUES (?, ?)
+                """, (user_id, crop_id))
+
+            conn.commit()
+            return True
+
+    @staticmethod
+    def add_user_crop(user_id: int, crop_id: int) -> bool:
+        """ユーザーに作物を追加"""
+        with get_db() as conn:
+            try:
+                conn.execute("""
+                    INSERT OR IGNORE INTO user_crops (user_id, crop_id)
+                    VALUES (?, ?)
+                """, (user_id, crop_id))
+                conn.commit()
+                return True
+            except Exception:
+                return False
+
+    @staticmethod
+    def remove_user_crop(user_id: int, crop_id: int) -> bool:
+        """ユーザーから作物を削除"""
+        with get_db() as conn:
+            conn.execute("""
+                DELETE FROM user_crops
+                WHERE user_id = ? AND crop_id = ?
+            """, (user_id, crop_id))
+            conn.commit()
+            return True
+
+
+# =============================================================================
 # 移行ユーティリティ
 # =============================================================================
 

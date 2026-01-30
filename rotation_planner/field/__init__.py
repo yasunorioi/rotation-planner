@@ -79,6 +79,7 @@ from .ui import (
     update_map_with_search,
     refresh_map,
     load_initial_data,
+    get_crop_choices,
 )
 
 # KML/KMZパーサー・エクスポートモジュール
@@ -94,6 +95,16 @@ from .kml_parser import (
     generate_kml_content,
     export_fields_to_kml,
     export_fields_to_kmz,
+)
+
+# 作物設定モジュール
+from .crop_settings import (
+    create_crop_settings_ui,
+    get_all_crops,
+    get_user_crop_ids,
+    get_user_crops,
+    load_crop_settings,
+    save_crop_settings,
 )
 
 # 筆ポリゴンモジュール
@@ -159,6 +170,14 @@ __all__ = [
     "update_map_with_search",
     "refresh_map",
     "load_initial_data",
+    "get_crop_choices",
+    # 作物設定
+    "create_crop_settings_ui",
+    "get_all_crops",
+    "get_user_crop_ids",
+    "get_user_crops",
+    "load_crop_settings",
+    "save_crop_settings",
     # 筆ポリゴン
     "FUDE_POLYGON_BASE_URL",
     "PMTILES_URL",

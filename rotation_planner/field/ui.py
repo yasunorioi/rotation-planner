@@ -42,6 +42,7 @@ from .kml_parser import (
     export_fields_to_kml,
     export_fields_to_kmz,
 )
+from .crop_settings import get_user_crops
 
 
 # =============================================================================
@@ -271,6 +272,21 @@ def export_kml_with_state(user_state: Dict[str, Any], format_type: str = "kml") 
     return output_path, f"✅ {len(export_fields)}件のほ場を{format_type.upper()}でエクスポートしました"
 
 
+def get_crop_choices(user_state: Dict[str, Any]) -> gr.Dropdown:
+    """ユーザーの作物選択肢を取得してDropdownを更新"""
+    user_id = user_state.get("user_id") if user_state else None
+    if not user_id:
+        return gr.Dropdown(choices=["（未設定）"], value="（未設定）")
+
+    user_crops = get_user_crops(user_id)
+    if user_crops:
+        choices = ["（未設定）"] + [c["name"] for c in user_crops]
+    else:
+        choices = ["（未設定）"]
+
+    return gr.Dropdown(choices=choices, value="（未設定）")
+
+
 def load_initial_data(user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
     """初期データ読み込み"""
     user_id = get_user_id_from_state(user_state)
@@ -414,6 +430,14 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
                 placeholder="例: 北1号"
             )
 
+            # 今年の作物（ユーザーが設定した作物から選択）
+            crop_input = gr.Dropdown(
+                label="今年の作物",
+                choices=["（未設定）"],
+                value="（未設定）",
+                allow_custom_value=False,
+            )
+
             beet_forbidden_input = gr.Checkbox(
                 label="馬鈴薯・てんさい禁止",
                 value=False
@@ -497,7 +521,7 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
 
     register_btn.click(
         fn=register_field_with_state,
-        inputs=[field_id_input, district_input, name_input, beet_forbidden_input, coords_input, user_state],
+        inputs=[field_id_input, district_input, name_input, crop_input, beet_forbidden_input, coords_input, user_state],
         outputs=[field_table, message_box, fields_json, field_id_input]
     ).then(
         fn=refresh_map,
@@ -563,6 +587,7 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
         "field_table": field_table,
         "message_box": message_box,
         "field_id_input": field_id_input,
+        "crop_input": crop_input,
         "load_fn": load_initial_data,
     }
 
@@ -577,6 +602,7 @@ __all__ = [
     "update_map_with_search",
     "refresh_map",
     "load_initial_data",
+    "get_crop_choices",
     "process_kml_upload",
     "register_kml_fields",
     "export_kml_with_state",

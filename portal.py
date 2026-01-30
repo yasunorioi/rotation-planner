@@ -19,7 +19,7 @@ from rotation_planner.common import (
 # UIモジュール
 from rotation_planner.app import create_rotation_planner_ui
 from rotation_planner.pesticide import create_pesticide_order_ui
-from rotation_planner.field import create_field_register_ui
+from rotation_planner.field import create_field_register_ui, create_crop_settings_ui
 
 # =============================================================================
 # 定数
@@ -240,6 +240,12 @@ def create_app():
                 登録したデータは「輪作計画メーカー」で使用できます。
                 """)
                 field_components = create_field_register_ui(user_state)
+
+            # =================================================================
+            # 🌱 作物設定タブ（farmer, ja_staff, admin）
+            # =================================================================
+            with gr.TabItem("🌱 作物設定", id="crop_settings") as crop_settings_tab:
+                crop_settings_components = create_crop_settings_ui(user_state)
 
             # =================================================================
             # 🌾 輪作計画タブ（farmer, ja_staff, admin）
@@ -485,6 +491,21 @@ def create_app():
             from rotation_planner.field import load_initial_data
             return load_initial_data(user_state_dict)
 
+        # 作物設定タブの初期化
+        def init_crop_settings_tab(user_state_dict):
+            """作物設定タブの初期化"""
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                return [], "ログインしてください"
+
+            from rotation_planner.field import load_crop_settings
+            return load_crop_settings(user_state_dict)
+
+        # ほ場登録の作物プルダウンを初期化
+        def init_crop_dropdown(user_state_dict):
+            """作物プルダウンの初期化"""
+            from rotation_planner.field import get_crop_choices
+            return get_crop_choices(user_state_dict)
+
         app.load(
             fn=on_app_load,
             outputs=[user_state, user_header, stats_card, farmers_tab, pesticide_master_tab, admin_tab]
@@ -497,6 +518,17 @@ def create_app():
                 field_components["welcome_msg"],
                 field_components["field_id_input"]
             ]
+        ).then(
+            fn=init_crop_settings_tab,
+            inputs=[user_state],
+            outputs=[
+                crop_settings_components["crop_checkboxes"],
+                crop_settings_components["message"]
+            ]
+        ).then(
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["crop_input"]]
         )
 
     return app

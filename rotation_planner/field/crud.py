@@ -171,6 +171,7 @@ def register_field_with_state(
     field_id: str,
     district: str,
     name: str,
+    crop: str,
     beet_forbidden: bool,
     coords_json: str,
     user_state: Dict[str, Any]
@@ -182,6 +183,7 @@ def register_field_with_state(
         field_id: ほ場ID
         district: 地区名
         name: ほ場名
+        crop: 今年の作物（空文字または「（未設定）」の場合は登録しない）
         beet_forbidden: 馬鈴薯・てんさい禁止フラグ
         coords_json: 座標JSON
         user_state: ユーザー情報
@@ -238,8 +240,24 @@ def register_field_with_state(
 
     # DB登録
     try:
-        new_field_id = FieldRepository.create_field(user_id, field_data)
+        new_field_db_id = FieldRepository.create_field(user_id, field_data)
         message = f"ほ場 '{field_id}' を登録しました（{area_ha:.4f} ha / {area_ha * 100:.2f} a）"
+
+        # 作物が設定されていれば、作付履歴にも登録
+        if crop and crop not in ("", "（未設定）"):
+            from datetime import datetime
+            current_year = str(datetime.now().year)
+            try:
+                CropHistoryRepository.add_history(
+                    field_id=new_field_db_id,
+                    year=current_year,
+                    crop=crop,
+                    is_inferred=False
+                )
+                message += f"（{current_year}年: {crop}）"
+            except Exception as crop_error:
+                message += f"（作付履歴の登録に失敗: {crop_error}）"
+
     except Exception as e:
         fields = get_user_fields(user_id)
         next_id = get_next_field_id(user_id)

@@ -41,3 +41,4 @@ test_*.js
 
 # バックアップ
 *.backup
+*.pdf

@@ -539,7 +539,7 @@ if __name__ == "__main__":
     import os
     # HF Spaces環境では server_name/port を指定しない
     if os.environ.get("SPACE_ID"):
-        app.launch(auth=authenticate)
+        app.launch(auth=authenticate, ssr_mode=False)
     else:
         app.launch(
             server_name="0.0.0.0",

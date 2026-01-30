@@ -228,29 +228,36 @@ ENABLE_AUTH = os.environ.get("DEMO_AUTH", "true").lower() == "true"
 if __name__ == "__main__":
     demo = create_demo_app()
 
-    launch_kwargs = {
-        "server_name": "0.0.0.0",
-        "server_port": 7860,
-        "share": False,
-    }
+    # HF Spaces環境判定
+    is_hf_spaces = os.environ.get("SPACE_ID") is not None
 
-    if ENABLE_AUTH:
-        # 認証あり起動
-        # デモ用ログイン: user1/demo123（農家）, admin/admin123（JA職員）
-        launch_kwargs["auth"] = demo_authenticate
-        launch_kwargs["auth_message"] = """
-        ## デモ版ログイン
-
-        以下のアカウントでログインできます:
-
-        | ロール | ユーザー名 | パスワード |
-        |--------|-----------|-----------|
-        | 農家 | user1 | demo123 |
-        | JA職員 | admin | admin123 |
-        """
-        print("認証有効モードで起動します")
-        print("デモ用ログイン: user1/demo123（農家）, admin/admin123（JA職員）")
+    if is_hf_spaces:
+        # HF Spacesでは認証なし、シンプルに起動
+        print("HF Spaces環境で起動します（認証なし）")
+        demo.launch()
     else:
-        print("認証なしモードで起動します")
+        # ローカル環境
+        launch_kwargs = {
+            "server_name": "0.0.0.0",
+            "server_port": 7860,
+            "share": False,
+        }
 
-    demo.launch(**launch_kwargs)
+        if ENABLE_AUTH:
+            launch_kwargs["auth"] = demo_authenticate
+            launch_kwargs["auth_message"] = """
+            ## デモ版ログイン
+
+            以下のアカウントでログインできます:
+
+            | ロール | ユーザー名 | パスワード |
+            |--------|-----------|-----------|
+            | 農家 | user1 | demo123 |
+            | JA職員 | admin | admin123 |
+            """
+            print("認証有効モードで起動します")
+            print("デモ用ログイン: user1/demo123（農家）, admin/admin123（JA職員）")
+        else:
+            print("認証なしモードで起動します")
+
+        demo.launch(**launch_kwargs)

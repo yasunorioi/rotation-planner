@@ -6,7 +6,7 @@ colorTo: yellow
 sdk: gradio
 sdk_version: 5.9.1
 python_version: "3.12"
-app_file: portal.py
+app_file: demo/app.py
 pinned: false
 license: mit
 ---

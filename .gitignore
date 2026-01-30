@@ -42,3 +42,4 @@ test_*.js
 # バックアップ
 *.backup
 *.pdf
+hf_token.sh

@@ -455,13 +455,17 @@ def create_app():
         # =================================================================
         def on_app_load(request: gr.Request):
             """アプリロード時の初期化処理"""
+            print(f"[DEBUG] on_app_load called: request={request}")
             if not request or not hasattr(request, 'username') or not request.username:
+                print(f"[DEBUG] on_app_load: No request or username")
                 return {}, "", "", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
             username = request.username
+            print(f"[DEBUG] on_app_load: username={username}")
 
             # ユーザー状態を構築
             user_state_dict = get_user_state_from_request(request)
+            print(f"[DEBUG] on_app_load: user_state_dict={user_state_dict}")
             role = user_state_dict.get("role", "farmer")
 
             # ヘッダー生成
@@ -494,12 +498,16 @@ def create_app():
         # 作物設定タブの初期化
         def init_crop_settings_tab(user_state_dict):
             """作物設定タブの初期化"""
+            print(f"[DEBUG] init_crop_settings_tab called: user_state_dict={user_state_dict}")
             if not user_state_dict or not user_state_dict.get("user_id"):
                 import pandas as pd
+                print(f"[DEBUG] init_crop_settings_tab: No user_id, returning login message")
                 return [], pd.DataFrame(columns=["ID", "作物名", "親作物"]), "ログインしてください"
 
             from rotation_planner.field import load_crop_settings
-            return load_crop_settings(user_state_dict)
+            result = load_crop_settings(user_state_dict)
+            print(f"[DEBUG] init_crop_settings_tab: Loaded settings, message={result[2]}")
+            return result
 
         # ほ場登録の作物プルダウンを初期化
         def init_crop_dropdown(user_state_dict):

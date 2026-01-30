@@ -174,13 +174,36 @@ def create_demo_app():
 
             # 🗺️ ほ場登録タブ
             with gr.TabItem("🗺️ ほ場登録", id="field"):
-                if FIELD_AVAILABLE:
-                    create_field_demo_ui()
-                else:
-                    create_placeholder_ui(
-                        "🗺️ ほ場登録アプリ",
-                        "地図上でポリゴンを描画してほ場を登録します。正確な面積計算とCSV出力で輪作計画メーカーと連携。"
-                    )
+                gr.Markdown("""
+                # 🗺️ ほ場登録アプリ
+
+                地図上でポリゴンを描画してほ場を登録します。
+                正確な面積計算とCSV出力で輪作計画メーカーと連携。
+
+                ---
+
+                ## ⚠️ デモ版では利用できません
+
+                ほ場登録機能は地図表示（Leaflet.js）を使用するため、
+                **Hugging Face Spaces のセキュリティ制約により、このデモ版では利用できません。**
+
+                ### 製品版の機能
+                - 🗺️ OpenStreetMap + Leaflet.jsによる地図表示
+                - 📐 ポリゴン描画によるほ場境界の登録
+                - 📏 WGS84楕円体による正確な面積計算
+                - 🔍 住所・地名検索（Nominatim API）
+                - 📄 輪作計画メーカー形式でのCSV出力
+
+                ---
+
+                **ローカル版をご利用ください:**
+                ```bash
+                git clone https://github.com/yasunorioi/rotation-planner
+                cd rotation-planner
+                pip install -r requirements.txt
+                python portal.py
+                ```
+                """)
 
         # フッター
         gr.Markdown("""

@@ -36,6 +36,7 @@ from .crud import (
     get_field_history_with_state,
     export_csv_with_state,
 )
+from .kml_parser import parse_kml_or_kmz_bytes, fields_to_dataframe_format
 
 
 # =============================================================================
@@ -91,6 +92,118 @@ def refresh_map(user_state: Dict[str, Any]) -> str:
     fude_polygons = _get_fude_polygons_for_area(DEFAULT_LAT, DEFAULT_LNG, DEFAULT_ZOOM)
 
     return generate_map_html(DEFAULT_LAT, DEFAULT_LNG, DEFAULT_ZOOM, fields, fude_polygons)
+
+
+# =============================================================================
+# KML/KMZインポート機能
+# =============================================================================
+
+def process_kml_upload(file) -> Tuple[pd.DataFrame, str, str]:
+    """
+    KML/KMZファイルをアップロードしてプレビュー
+
+    Args:
+        file: Gradioのファイルオブジェクト
+
+    Returns:
+        (プレビューDataFrame, メッセージ, 座標JSON)
+    """
+    if file is None:
+        return pd.DataFrame(), "ファイルを選択してください", "[]"
+
+    try:
+        # ファイルを読み込み
+        with open(file.name, 'rb') as f:
+            file_bytes = f.read()
+
+        filename = file.name.split('/')[-1]
+        fields = parse_kml_or_kmz_bytes(file_bytes, filename)
+
+        if not fields:
+            return pd.DataFrame(), "⚠️ ポリゴンが見つかりませんでした。KML/KMZファイルを確認してください。", "[]"
+
+        # DataFrameに変換
+        df_data = fields_to_dataframe_format(fields)
+        df = pd.DataFrame(df_data)
+
+        # 表示用に整形
+        display_df = df[["ほ場ID", "ほ場名", "面積(a)", "面積(ha)", "座標数"]].copy()
+
+        # 座標データをJSON化（登録時に使用）
+        import json
+        coords_json = json.dumps([{
+            "field_id": row["ほ場ID"],
+            "name": row["ほ場名"],
+            "coordinates": row["_coordinates"],
+            "area_a": row["面積(a)"],
+            "area_ha": row["面積(ha)"],
+        } for row in df_data])
+
+        return (
+            display_df,
+            f"✅ {len(fields)}件のほ場を検出しました。確認して登録してください。",
+            coords_json
+        )
+
+    except Exception as e:
+        return pd.DataFrame(), f"❌ エラー: {str(e)}", "[]"
+
+
+def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
+    """
+    KMLから読み込んだほ場を一括登録
+
+    Args:
+        kml_coords_json: process_kml_uploadで生成した座標JSON
+        user_state: ユーザー状態
+
+    Returns:
+        (更新後のほ場一覧, メッセージ, fields_json, 次のほ場ID)
+    """
+    import json
+
+    user_id = get_user_id_from_state(user_state)
+    if not user_id:
+        return pd.DataFrame(), "ログインしてください", "[]", ""
+
+    if not kml_coords_json or kml_coords_json == "[]":
+        return fields_to_dataframe(get_user_fields(user_id)), "インポートするデータがありません", "[]", ""
+
+    try:
+        kml_fields = json.loads(kml_coords_json)
+    except json.JSONDecodeError:
+        return fields_to_dataframe(get_user_fields(user_id)), "データの読み込みに失敗しました", "[]", ""
+
+    registered = 0
+    errors = []
+
+    for field in kml_fields:
+        coords_str = json.dumps(field["coordinates"])
+        result = register_field_with_state(
+            field_id=field["field_id"],
+            district="",  # KMLには地区情報がないので空
+            name=field["name"],
+            beet_forbidden=False,
+            coords_json=coords_str,
+            user_state=user_state
+        )
+        # register_field_with_state は (df, message, json, next_id) を返す
+        if "登録しました" in result[1]:
+            registered += 1
+        else:
+            errors.append(f"{field['field_id']}: {result[1]}")
+
+    # 最新のほ場一覧を取得
+    fields = get_user_fields(user_id)
+    fields_json_str = get_fields_json_for_map(fields)
+    next_id = get_next_field_id(user_id)
+
+    if errors:
+        message = f"✅ {registered}件登録、⚠️ {len(errors)}件エラー\n" + "\n".join(errors[:3])
+    else:
+        message = f"✅ {registered}件のほ場を登録しました"
+
+    return fields_to_dataframe(fields), message, fields_json_str, next_id
 
 
 def load_initial_data(user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
@@ -173,6 +286,32 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
             - オレンジ色の区画をクリックすると、そのほ場を選択できます
             - ※ズームレベル15以上で表示されます
             """)
+
+            # KML/KMZインポート
+            gr.Markdown("---")
+            gr.Markdown("## 📥 KML/KMZインポート")
+            gr.Markdown("""
+            Google EarthでKML/KMZファイルを作成してインポートできます。
+            """)
+
+            kml_file_input = gr.File(
+                label="KML/KMZファイル",
+                file_types=[".kml", ".kmz"],
+                type="filepath"
+            )
+            kml_upload_btn = gr.Button("📂 ファイルを読み込む")
+            kml_message = gr.Textbox(label="読み込み結果", interactive=False)
+
+            kml_preview_table = gr.Dataframe(
+                value=pd.DataFrame(columns=["ほ場ID", "ほ場名", "面積(a)", "面積(ha)", "座標数"]),
+                label="プレビュー",
+                interactive=False
+            )
+
+            # 隠しフィールド（KML座標データ）
+            kml_coords_json = gr.Textbox(visible=False, value="[]")
+
+            kml_register_btn = gr.Button("✅ 全て登録", variant="primary")
 
         with gr.Column(scale=1):
             gr.Markdown("## 📝 ほ場情報")
@@ -303,6 +442,23 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
         outputs=[history_output]
     )
 
+    # KML/KMZインポート
+    kml_upload_btn.click(
+        fn=process_kml_upload,
+        inputs=[kml_file_input],
+        outputs=[kml_preview_table, kml_message, kml_coords_json]
+    )
+
+    kml_register_btn.click(
+        fn=register_kml_fields,
+        inputs=[kml_coords_json, user_state],
+        outputs=[field_table, message_box, fields_json, field_id_input]
+    ).then(
+        fn=refresh_map,
+        inputs=[user_state],
+        outputs=[map_html]
+    )
+
     # コンポーネント辞書を返す（初期化用に使用）
     return {
         "welcome_msg": welcome_msg,
@@ -324,4 +480,6 @@ __all__ = [
     "update_map_with_search",
     "refresh_map",
     "load_initial_data",
+    "process_kml_upload",
+    "register_kml_fields",
 ]

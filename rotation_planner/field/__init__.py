@@ -81,6 +81,16 @@ from .ui import (
     load_initial_data,
 )
 
+# KML/KMZパーサーモジュール
+from .kml_parser import (
+    parse_kml_content,
+    parse_kml_file,
+    parse_kmz_file,
+    parse_kml_or_kmz,
+    parse_kml_or_kmz_bytes,
+    fields_to_dataframe_format,
+)
+
 # 筆ポリゴンモジュール
 from .fude_polygon import (
     # 定数
@@ -103,6 +113,13 @@ from .fude_polygon import (
 
 # 公開API
 __all__ = [
+    # KML/KMZパーサー
+    "parse_kml_content",
+    "parse_kml_file",
+    "parse_kmz_file",
+    "parse_kml_or_kmz",
+    "parse_kml_or_kmz_bytes",
+    "fields_to_dataframe_format",
     # 定数
     "DEFAULT_LAT",
     "DEFAULT_LNG",

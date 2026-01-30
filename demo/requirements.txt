@@ -1,5 +1,5 @@
 # 輪作計画メーカー デモ版
 # Note: gradio is provided by HF Spaces via sdk_version
-huggingface_hub==0.24.7
+gradio_client==1.5.0
 pandas
 numpy

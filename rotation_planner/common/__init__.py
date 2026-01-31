@@ -40,8 +40,10 @@ from rotation_planner.common.auth import (
     get_user_info,
     get_user_role,
     is_admin_role,
-    can_access_farmer,
-    get_accessible_farmers,
+    can_access_user_data,
+    can_access_farmer,  # 後方互換
+    get_accessible_user_ids,
+    get_accessible_farmers,  # 後方互換
     add_user,
     update_password,
     update_user_role,
@@ -123,8 +125,10 @@ __all__ = [
     "get_user_info",
     "get_user_role",
     "is_admin_role",
-    "can_access_farmer",
-    "get_accessible_farmers",
+    "can_access_user_data",
+    "can_access_farmer",  # 後方互換
+    "get_accessible_user_ids",
+    "get_accessible_farmers",  # 後方互換
     "add_user",
     "update_password",
     "update_user_role",

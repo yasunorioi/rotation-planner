@@ -40,7 +40,6 @@ class User:
     username: str
     role: str  # admin, ja_staff, farmer
     display_name: str
-    farmer_id: Optional[str] = None
     org_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

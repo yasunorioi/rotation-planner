@@ -119,10 +119,9 @@ def create_stats_card(username: str) -> str:
             """
         else:
             # 農家: 自分のデータ
-            farmer_id = user.get("farmer_id")
-            if farmer_id:
+            user_id = user.get("id")
+            if user_id:
                 try:
-                    user_id = int(farmer_id)
                     fields = FieldRepository.get_fields(user_id)
                     plans = PlanRepository.get_plans(user_id)
                     total_area = sum(f.get('area_ha', 0) for f in fields)
@@ -168,7 +167,6 @@ def get_user_state_from_request(request: gr.Request) -> Dict[str, Any]:
         "username": username,
         "display_name": user.get("display_name", username),
         "role": user.get("role", "farmer"),
-        "farmer_id": user.get("farmer_id"),
         "org_id": db_user.get("org_id") if db_user else None,
     }
 
@@ -223,7 +221,6 @@ def create_app():
                     "username": selected_user,
                     "display_name": user.get("display_name", selected_user),
                     "role": user.get("role", "farmer"),
-                    "farmer_id": user.get("farmer_id"),
                     "org_id": db_user.get("org_id") if db_user else None,
                 }
 

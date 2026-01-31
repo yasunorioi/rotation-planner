@@ -55,12 +55,12 @@ class TestDataIsolation:
 class TestAccessControl:
     """アクセス制御テスト"""
 
-    def test_can_access_farmer_strict_check(self):
+    def test_can_access_user_data_strict_check(self):
         """
-        can_access_farmer関数が厳密にチェックすること
+        can_access_user_data関数が厳密にチェックすること
         """
         # 存在しないユーザー
-        result = auth.can_access_farmer("nonexistent", "F001")
+        result = auth.can_access_user_data("nonexistent", 1)
         assert result is False, "存在しないユーザーがアクセスできてはいけない"
 
     def test_admin_bypass_is_intentional(self):
@@ -68,8 +68,8 @@ class TestAccessControl:
         管理者のバイパスは意図的であること
         """
         # adminは全データにアクセス可能（これは仕様）
-        assert auth.can_access_farmer("admin", "F001") is True
-        assert auth.can_access_farmer("admin", "F999") is True
+        assert auth.can_access_user_data("admin", 1) is True
+        assert auth.can_access_user_data("admin", 999) is True
 
     def test_role_escalation_not_possible(self):
         """

@@ -1,7 +1,15 @@
 -- ═══════════════════════════════════════════════════════════════
 -- 農業管理アプリ - SQLiteスキーマ
--- Version: 1.0
+-- Version: 1.1
 -- Created: 2026-01-29
+-- Updated: 2026-02-01
+-- ═══════════════════════════════════════════════════════════════
+--
+-- 組織(org_id)について:
+--   現在は単一JA想定。org_id=1がJA、org_id=2が個人農家。
+--   将来の複数JA対応時は、組織ごとのデータ分離を実装する。
+--   防除マスタはorg_id=NULLが共通、org_id指定が組織固有。
+--
 -- ═══════════════════════════════════════════════════════════════
 
 -- 外部キー制約を有効化
@@ -9,6 +17,8 @@ PRAGMA foreign_keys = ON;
 
 -- ═══════════════════════════════════════════════════════════════
 -- 1. 組織マスタ（JA、個人農家グループ等）
+--    現状: id=1 JA北海道, id=2 個人農家（デフォルト）
+--    将来: 複数JAに対応する場合は行を追加
 -- ═══════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS organizations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,24 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_plan_details_plan ON plan_details(plan_id);
 CREATE INDEX IF NOT EXISTS idx_plan_details_field ON plan_details(field_id);
 
 -- ═══════════════════════════════════════════════════════════════
--- 7. 作物制約（ユーザーごとの面積上限等）
--- ═══════════════════════════════════════════════════════════════
-CREATE TABLE IF NOT EXISTS crop_constraints (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    crop TEXT NOT NULL,
-    cap_ha REAL,
-    min_ha REAL,
-    min_gap_years INTEGER,
-    min_fields INTEGER,
-    max_fields INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, crop)
-);
-CREATE INDEX IF NOT EXISTS idx_crop_constraints_user ON crop_constraints(user_id);
-
--- ═══════════════════════════════════════════════════════════════
--- 8. 防除マスタ（組織単位で共有）
+-- 7. 防除マスタ（組織単位で共有）
 -- ═══════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS pesticide_masters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2,7 +2,7 @@
 防除マスタ管理モジュール
 
 防除マスタの読み込み・管理機能を提供。
-DB優先、CSVフォールバック方式。
+DB正（pesticide_mastersテーブル）。CSVはインポート用。
 """
 
 import pandas as pd
@@ -15,22 +15,12 @@ try:
 except ImportError:
     PesticideMasterRepository = None
 
-# =============================================================================
-# パス設定
-# =============================================================================
-
-def get_default_master_path() -> str:
-    """デフォルトの防除マスタCSVパスを取得"""
-    # rotation_planner_ui ディレクトリを基準に
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base_dir, "pesticide_master.csv")
-
 
 # =============================================================================
-# マスタ読み込み
+# マスタ読み込み（DB）
 # =============================================================================
 
-def load_pesticide_master_from_db(org_id: int = None) -> pd.DataFrame:
+def load_pesticide_master(org_id: int = None) -> pd.DataFrame:
     """
     防除マスタをDBから読み込み
 
@@ -38,7 +28,7 @@ def load_pesticide_master_from_db(org_id: int = None) -> pd.DataFrame:
         org_id: 組織ID（組織別マスタがある場合に使用）
 
     Returns:
-        防除マスタのDataFrame。DBにデータがない場合はCSVからフォールバック。
+        防除マスタのDataFrame
     """
     if PesticideMasterRepository is not None:
         try:
@@ -48,13 +38,28 @@ def load_pesticide_master_from_db(org_id: int = None) -> pd.DataFrame:
         except Exception:
             pass
 
-    # DBにデータがない場合はCSVからフォールバック
-    return load_pesticide_master_csv()
+    return pd.DataFrame()
+
+
+# 後方互換エイリアス
+def load_pesticide_master_from_db(org_id: int = None) -> pd.DataFrame:
+    """後方互換用。load_pesticide_master() を使用してください。"""
+    return load_pesticide_master(org_id)
+
+
+# =============================================================================
+# CSVインポート用
+# =============================================================================
+
+def get_default_master_path() -> str:
+    """デフォルトの防除マスタCSVパスを取得（インポート用）"""
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_dir, "pesticide_master.csv")
 
 
 def load_pesticide_master_csv(master_path: str = None) -> pd.DataFrame:
     """
-    防除マスタCSVを読み込み
+    防除マスタCSVを読み込み（インポート用）
 
     Args:
         master_path: CSVファイルパス（Noneの場合はデフォルトパス）

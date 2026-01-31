@@ -729,6 +729,123 @@ class PesticideMasterRepository:
             """, (org_id,))
             return rows_to_list(cursor.fetchall())
 
+    @staticmethod
+    def get_by_id(master_id: int) -> Optional[Dict[str, Any]]:
+        """IDで防除マスタを取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_masters WHERE id = ?",
+                (master_id,)
+            )
+            return row_to_dict(cursor.fetchone())
+
+    @staticmethod
+    def create(data: Dict[str, Any]) -> int:
+        """防除マスタを作成"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                INSERT INTO pesticide_masters
+                (org_id, crop, month, period, target, pesticide_name,
+                 dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data.get('org_id'),
+                data.get('crop'),
+                data.get('month'),
+                data.get('period'),
+                data.get('target'),
+                data.get('pesticide_name'),
+                data.get('dilution_rate'),
+                data.get('amount_per_10a'),
+                data.get('unit'),
+                data.get('days_before_harvest'),
+                data.get('notes'),
+            ))
+            return cursor.lastrowid
+
+    @staticmethod
+    def update(master_id: int, data: Dict[str, Any]) -> bool:
+        """防除マスタを更新"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                UPDATE pesticide_masters SET
+                    crop = ?,
+                    month = ?,
+                    period = ?,
+                    target = ?,
+                    pesticide_name = ?,
+                    dilution_rate = ?,
+                    amount_per_10a = ?,
+                    unit = ?,
+                    days_before_harvest = ?,
+                    notes = ?
+                WHERE id = ?
+            """, (
+                data.get('crop'),
+                data.get('month'),
+                data.get('period'),
+                data.get('target'),
+                data.get('pesticide_name'),
+                data.get('dilution_rate'),
+                data.get('amount_per_10a'),
+                data.get('unit'),
+                data.get('days_before_harvest'),
+                data.get('notes'),
+                master_id,
+            ))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete(master_id: int) -> bool:
+        """防除マスタを削除"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM pesticide_masters WHERE id = ?",
+                (master_id,)
+            )
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def bulk_import(records: List[Dict[str, Any]], org_id: int = None) -> int:
+        """CSVからの一括インポート"""
+        count = 0
+        with get_db() as conn:
+            for record in records:
+                record['org_id'] = org_id
+                conn.execute("""
+                    INSERT INTO pesticide_masters
+                    (org_id, crop, month, period, target, pesticide_name,
+                     dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    record.get('org_id'),
+                    record.get('crop'),
+                    record.get('month'),
+                    record.get('period'),
+                    record.get('target'),
+                    record.get('pesticide_name'),
+                    record.get('dilution_rate'),
+                    record.get('amount_per_10a'),
+                    record.get('unit'),
+                    record.get('days_before_harvest'),
+                    record.get('notes'),
+                ))
+                count += 1
+        return count
+
+    @staticmethod
+    def delete_all(org_id: int = None) -> int:
+        """全レコード削除（インポート前のクリア用）"""
+        with get_db() as conn:
+            if org_id is None:
+                cursor = conn.execute("DELETE FROM pesticide_masters WHERE org_id IS NULL")
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM pesticide_masters WHERE org_id = ?",
+                    (org_id,)
+                )
+            return cursor.rowcount
+
 
 # =============================================================================
 # 作物マスタリポジトリ

@@ -52,7 +52,7 @@ def get_users_for_display() -> List[List[Any]]:
             user.get("username", ""),
             ROLE_DISPLAY.get(user.get("role", ""), user.get("role", "")),
             user.get("display_name", ""),
-            str(user.get("id", "")),  # user_id を farmer_id として表示
+            str(user.get("id", "")),  # ユーザーID
             "●●●●●●"  # パスワードは非表示
         ])
 
@@ -75,7 +75,7 @@ def _get_user_role_by_row(row_index: int) -> Optional[str]:
     return users[row_index].get("role")
 
 
-def add_user(username: str, password: str, role: str, display_name: str, farmer_id: str) -> Tuple[str, List]:
+def add_user(username: str, password: str, role: str, display_name: str) -> Tuple[str, List]:
     """ユーザーを追加（DB版）"""
     if not username:
         return "エラー: ユーザー名は必須です", get_users_for_display()
@@ -453,7 +453,7 @@ def create_admin_ui(current_username: str = "") -> Dict[str, Any]:
             gr.Markdown("### ユーザー一覧")
 
             users_table = gr.Dataframe(
-                headers=["#", "ユーザー名", "ロール", "表示名", "農家ID", "パスワード"],
+                headers=["#", "ユーザー名", "ロール", "表示名", "ユーザーID", "パスワード"],
                 datatype=["number", "str", "str", "str", "str", "str"],
                 value=get_users_for_display(),
                 label="ユーザー一覧",
@@ -475,16 +475,15 @@ def create_admin_ui(current_username: str = "") -> Dict[str, Any]:
                     with gr.Column():
                         new_username = gr.Textbox(label="ユーザー名 *", placeholder="例: farmer01")
                         new_password = gr.Textbox(label="パスワード *", type="password", placeholder="4文字以上")
-                        new_role = gr.Dropdown(choices=ROLE_CHOICES, value="farmer", label="ロール")
                     with gr.Column():
+                        new_role = gr.Dropdown(choices=ROLE_CHOICES, value="farmer", label="ロール")
                         new_display_name = gr.Textbox(label="表示名", placeholder="例: 田中太郎")
-                        new_farmer_id = gr.Textbox(label="農家ID（農家の場合）", placeholder="例: F001")
 
                 add_btn = gr.Button("➕ ユーザー追加", variant="primary")
 
                 add_btn.click(
                     fn=add_user,
-                    inputs=[new_username, new_password, new_role, new_display_name, new_farmer_id],
+                    inputs=[new_username, new_password, new_role, new_display_name],
                     outputs=[result_msg, users_table]
                 )
 

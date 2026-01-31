@@ -85,41 +85,39 @@ class TestGetUserInfo:
 
 
 class TestCanAccessFarmer:
-    """農家データアクセス権限のテスト"""
+    """ユーザーデータアクセス権限のテスト"""
 
-    def test_admin_can_access_any_farmer(self):
-        """管理者は全農家のデータにアクセス可能"""
-        result = auth.can_access_farmer("admin", "F001")
+    def test_admin_can_access_any_user(self):
+        """管理者は全ユーザーのデータにアクセス可能"""
+        result = auth.can_access_user_data("admin", 1)
         assert result is True
 
-        result = auth.can_access_farmer("admin", "F999")
+        result = auth.can_access_user_data("admin", 999)
         assert result is True
 
-    def test_ja_staff_can_access_any_farmer(self):
-        """JA職員は全農家のデータにアクセス可能"""
-        # ja_staffユーザーがいる場合のテスト
+    def test_ja_staff_can_access_any_user(self):
+        """JA職員は全ユーザーのデータにアクセス可能"""
         user = auth.get_user_info("ja_staff")
         if user:
-            result = auth.can_access_farmer("ja_staff", "F001")
+            result = auth.can_access_user_data("ja_staff", 1)
             assert result is True
 
     def test_farmer_can_access_own_data(self):
         """農家は自分のデータにのみアクセス可能"""
-        # farmer_demo / F001 の場合
         user = auth.get_user_info("farmer_demo")
-        if user and user.get("farmer_id"):
-            farmer_id = user["farmer_id"]
-            result = auth.can_access_farmer("farmer_demo", farmer_id)
+        if user and user.get("id"):
+            user_id = user["id"]
+            result = auth.can_access_user_data("farmer_demo", user_id)
             assert result is True
 
-    def test_farmer_cannot_access_other_farmer_data(self):
-        """農家は他の農家のデータにアクセス不可（切腹案件テスト）"""
+    def test_farmer_cannot_access_other_user_data(self):
+        """農家は他のユーザーのデータにアクセス不可（切腹案件テスト）"""
         user = auth.get_user_info("farmer_demo")
-        if user and user.get("farmer_id"):
-            # 別の農家ID
-            other_farmer_id = "OTHER_FARMER_999"
-            result = auth.can_access_farmer("farmer_demo", other_farmer_id)
-            assert result is False, "他農家のデータにアクセスできてはいけない！"
+        if user and user.get("id"):
+            # 別のユーザーID
+            other_user_id = 9999
+            result = auth.can_access_user_data("farmer_demo", other_user_id)
+            assert result is False, "他ユーザーのデータにアクセスできてはいけない！"
 
 
 class TestRoles:

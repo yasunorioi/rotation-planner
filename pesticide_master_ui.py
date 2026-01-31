@@ -1,6 +1,8 @@
 """
 防除マスタ管理UI - JA職員向け
 防除スケジュール（農薬マスタ）の登録・編集・削除機能
+
+データソース: SQLite DB (pesticide_masters テーブル)
 """
 
 import gradio as gr
@@ -9,11 +11,14 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
+from rotation_planner.common import PesticideMasterRepository
+
 # =============================================================================
 # 定数
 # =============================================================================
 
-MASTER_FILE = Path(__file__).parent / "pesticide_master.csv"
+# CSVインポート用のパス
+MASTER_CSV_FILE = Path(__file__).parent / "pesticide_master.csv"
 
 # CSVカラム定義
 COLUMNS = [
@@ -53,43 +58,19 @@ UNITS = ["mL", "g", "L", "kg", "倍"]
 
 
 # =============================================================================
-# データ操作
+# データ操作（DB版）
 # =============================================================================
 
-def load_master() -> pd.DataFrame:
-    """防除マスタを読み込み"""
-    if not MASTER_FILE.exists():
-        return pd.DataFrame(columns=COLUMNS)
-
-    try:
-        df = pd.read_csv(MASTER_FILE, encoding="utf-8")
-        return df
-    except Exception as e:
-        print(f"マスタ読み込みエラー: {e}")
-        return pd.DataFrame(columns=COLUMNS)
-
-
-def save_master(df: pd.DataFrame) -> bool:
-    """防除マスタを保存"""
-    try:
-        df.to_csv(MASTER_FILE, index=False, encoding="utf-8")
-        return True
-    except Exception as e:
-        print(f"マスタ保存エラー: {e}")
-        return False
-
-
-def get_master_for_display() -> List[List[Any]]:
-    """表示用にマスタデータを取得"""
-    df = load_master()
-    if df.empty:
+def get_master_for_display(org_id: int = None) -> List[List[Any]]:
+    """表示用にマスタデータを取得（DBから）"""
+    rows = PesticideMasterRepository.get_all(org_id)
+    if not rows:
         return []
 
-    # 表示用に整形
     display_data = []
-    for idx, row in df.iterrows():
+    for row in rows:
         display_data.append([
-            idx,  # 行番号（編集・削除用）
+            row.get("id", ""),  # DB ID（編集・削除用）
             row.get("crop", ""),
             row.get("month", ""),
             row.get("period", ""),
@@ -105,23 +86,23 @@ def get_master_for_display() -> List[List[Any]]:
     return display_data
 
 
-def filter_master(crop: str, month: str) -> List[List[Any]]:
+def filter_master(crop: str, month: str, org_id: int = None) -> List[List[Any]]:
     """作物・月でフィルタリング"""
-    df = load_master()
+    rows = PesticideMasterRepository.get_all(org_id)
 
     if crop and crop != "すべて":
-        df = df[df["crop"] == crop]
+        rows = [r for r in rows if r.get("crop") == crop]
 
     if month and month != "すべて":
-        df = df[df["month"].astype(str) == str(month)]
+        rows = [r for r in rows if str(r.get("month", "")) == str(month)]
 
-    if df.empty:
+    if not rows:
         return []
 
     display_data = []
-    for idx, row in df.iterrows():
+    for row in rows:
         display_data.append([
-            idx,
+            row.get("id", ""),
             row.get("crop", ""),
             row.get("month", ""),
             row.get("period", ""),
@@ -138,96 +119,94 @@ def filter_master(crop: str, month: str) -> List[List[Any]]:
 
 
 def add_record(crop, month, period, target, pesticide_name,
-               dilution_rate, amount_per_10a, unit, days_before_harvest, notes) -> Tuple[str, List]:
-    """レコードを追加"""
+               dilution_rate, amount_per_10a, unit, days_before_harvest, notes,
+               org_id: int = None) -> Tuple[str, List]:
+    """レコードを追加（DBに保存）"""
     if not crop or not pesticide_name:
-        return "エラー: 作物と農薬名は必須です", get_master_for_display()
+        return "エラー: 作物と農薬名は必須です", get_master_for_display(org_id)
 
-    df = load_master()
-
-    new_row = {
+    data = {
+        "org_id": org_id,
         "crop": crop,
-        "month": month,
+        "month": month if month else None,
         "period": period,
         "target": target,
         "pesticide_name": pesticide_name,
-        "dilution_rate": dilution_rate if dilution_rate else "",
-        "amount_per_10a": amount_per_10a if amount_per_10a else "",
+        "dilution_rate": dilution_rate if dilution_rate else None,
+        "amount_per_10a": amount_per_10a if amount_per_10a else None,
         "unit": unit,
         "days_before_harvest": days_before_harvest,
         "notes": notes
     }
 
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    try:
+        PesticideMasterRepository.create(data)
+        return f"追加完了: {crop} - {pesticide_name}", get_master_for_display(org_id)
+    except Exception as e:
+        return f"エラー: 保存に失敗しました - {e}", get_master_for_display(org_id)
 
-    if save_master(df):
-        return f"追加完了: {crop} - {pesticide_name}", get_master_for_display()
+
+def delete_record(master_id: int, org_id: int = None) -> Tuple[str, List]:
+    """レコードを削除（DBから）"""
+    if master_id is None or master_id < 1:
+        return "エラー: 削除する行のIDを入力してください", get_master_for_display(org_id)
+
+    # 削除前に情報取得
+    record = PesticideMasterRepository.get_by_id(master_id)
+    if not record:
+        return "エラー: 指定されたレコードが見つかりません", get_master_for_display(org_id)
+
+    deleted_info = f"{record.get('crop', '')} - {record.get('pesticide_name', '')}"
+
+    if PesticideMasterRepository.delete(master_id):
+        return f"削除完了: {deleted_info}", get_master_for_display(org_id)
     else:
-        return "エラー: 保存に失敗しました", get_master_for_display()
+        return "エラー: 削除に失敗しました", get_master_for_display(org_id)
 
 
-def delete_record(row_index: int) -> Tuple[str, List]:
-    """レコードを削除"""
-    if row_index is None or row_index < 0:
-        return "エラー: 削除する行を選択してください", get_master_for_display()
-
-    df = load_master()
-
-    if row_index >= len(df):
-        return "エラー: 無効な行番号です", get_master_for_display()
-
-    deleted_row = df.iloc[row_index]
-    deleted_info = f"{deleted_row.get('crop', '')} - {deleted_row.get('pesticide_name', '')}"
-
-    df = df.drop(index=row_index).reset_index(drop=True)
-
-    if save_master(df):
-        return f"削除完了: {deleted_info}", get_master_for_display()
-    else:
-        return "エラー: 保存に失敗しました", get_master_for_display()
-
-
-def import_csv(file) -> Tuple[str, List]:
-    """CSVファイルをインポート"""
+def import_csv(file, replace_mode: bool = False, org_id: int = None) -> Tuple[str, List]:
+    """CSVファイルをインポート（DBに保存）"""
     if file is None:
-        return "エラー: ファイルを選択してください", get_master_for_display()
+        return "エラー: ファイルを選択してください", get_master_for_display(org_id)
 
     try:
         # アップロードされたファイルを読み込み
-        import_df = pd.read_csv(file.name, encoding="utf-8")
+        try:
+            import_df = pd.read_csv(file.name, encoding="utf-8")
+        except Exception:
+            import_df = pd.read_csv(file.name, encoding="utf-8-sig")
 
-        # カラム検証
-        missing_cols = set(COLUMNS) - set(import_df.columns)
+        # 最低限必要なカラム
+        required_cols = {"crop", "pesticide_name"}
+        missing_cols = required_cols - set(import_df.columns)
         if missing_cols:
-            return f"エラー: 必須カラムがありません: {missing_cols}", get_master_for_display()
+            return f"エラー: 必須カラムがありません: {missing_cols}", get_master_for_display(org_id)
 
-        # 既存データに追加（または置換）
-        existing_df = load_master()
+        # 置換モードの場合は既存データを削除
+        if replace_mode:
+            deleted_count = PesticideMasterRepository.delete_all(org_id)
 
-        # 追加モード
-        combined_df = pd.concat([existing_df, import_df[COLUMNS]], ignore_index=True)
+        # レコードを一括インポート
+        records = import_df.to_dict('records')
+        imported_count = PesticideMasterRepository.bulk_import(records, org_id)
 
-        # 重複削除（作物・月・農薬名で判定）
-        combined_df = combined_df.drop_duplicates(
-            subset=["crop", "month", "period", "pesticide_name"],
-            keep="last"
-        )
-
-        if save_master(combined_df):
-            return f"インポート完了: {len(import_df)}件追加（重複除外後: {len(combined_df)}件）", get_master_for_display()
+        if replace_mode:
+            return f"インポート完了: {imported_count}件（既存{deleted_count}件を置換）", get_master_for_display(org_id)
         else:
-            return "エラー: 保存に失敗しました", get_master_for_display()
+            return f"インポート完了: {imported_count}件を追加", get_master_for_display(org_id)
 
     except Exception as e:
-        return f"エラー: {str(e)}", get_master_for_display()
+        return f"エラー: {str(e)}", get_master_for_display(org_id)
 
 
-def get_statistics() -> str:
-    """統計情報を取得"""
-    df = load_master()
+def get_statistics(org_id: int = None) -> str:
+    """統計情報を取得（DBから）"""
+    rows = PesticideMasterRepository.get_all(org_id)
 
-    if df.empty:
+    if not rows:
         return "データがありません"
+
+    df = pd.DataFrame(rows)
 
     stats = []
     stats.append(f"**総レコード数**: {len(df)}件")
@@ -243,7 +222,7 @@ def get_statistics() -> str:
 
     for month in sorted(df["month"].dropna().unique()):
         count = len(df[df["month"] == month])
-        stats.append(f"- {month}月: {count}件")
+        stats.append(f"- {int(month)}月: {count}件")
 
     return "\n".join(stats)
 
@@ -356,35 +335,51 @@ def create_pesticide_master_ui() -> Dict[str, Any]:
         # =================================================================
         # CSVインポートタブ
         # =================================================================
-        with gr.TabItem("📤 インポート"):
+        with gr.TabItem("📤 インポート/エクスポート"):
             gr.Markdown("""
             ### CSVファイルからインポート
 
             既存のCSVファイルを読み込んでマスタに追加します。
 
-            **必須カラム**:
-            ```
-            crop, month, period, target, pesticide_name, dilution_rate, amount_per_10a, unit, days_before_harvest, notes
-            ```
+            **必須カラム**: `crop`, `pesticide_name`
+
+            **オプションカラム**: `month`, `period`, `target`, `dilution_rate`, `amount_per_10a`, `unit`, `days_before_harvest`, `notes`
             """)
 
             import_file = gr.File(label="CSVファイルを選択", file_types=[".csv"])
+            import_replace = gr.Checkbox(label="既存データを置換（チェックしない場合は追加）", value=False)
             import_btn = gr.Button("📤 インポート", variant="primary")
             import_result = gr.Textbox(label="結果", interactive=False)
 
             import_btn.click(
                 fn=import_csv,
-                inputs=[import_file],
+                inputs=[import_file, import_replace],
                 outputs=[import_result, master_table]
             )
 
             gr.Markdown("---")
-            gr.Markdown("### 現在のマスタをダウンロード")
+            gr.Markdown("### 現在のマスタをエクスポート")
 
-            def get_master_file():
-                return str(MASTER_FILE) if MASTER_FILE.exists() else None
+            def export_master_csv():
+                """DBからCSVをエクスポート"""
+                rows = PesticideMasterRepository.get_all()
+                if not rows:
+                    return None
+                df = pd.DataFrame(rows)
+                # 不要なカラムを除外
+                export_cols = [c for c in COLUMNS if c in df.columns]
+                export_path = Path(__file__).parent / "data" / "pesticide_master_export.csv"
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                df[export_cols].to_csv(export_path, index=False, encoding="utf-8-sig")
+                return str(export_path)
 
-            download_btn = gr.DownloadButton("📥 CSVダウンロード", value=get_master_file())
+            export_btn = gr.Button("📥 CSVエクスポート")
+            export_file = gr.File(label="ダウンロード", interactive=False)
+
+            export_btn.click(
+                fn=export_master_csv,
+                outputs=[export_file]
+            )
 
         # =================================================================
         # 統計タブ

@@ -2,7 +2,7 @@
 認証モジュール - Gradio標準認証 + SQLite DB
 
 使用方法:
-    from rotation_planner.common.auth import authenticate, get_user_info, can_access_farmer
+    from rotation_planner.common.auth import authenticate, get_user_info, can_access_user_data
 
     # Gradio launchで使用
     demo.launch(auth=authenticate)
@@ -11,7 +11,7 @@
     user = get_user_info(request.username)
 
     # アクセス権限チェック
-    if can_access_farmer(username, farmer_id):
+    if can_access_user_data(username, target_user_id):
         # データにアクセス
         pass
 """
@@ -163,9 +163,9 @@ def get_user_info(username: str) -> Optional[Dict[str, Any]]:
 
     return {
         "id": row["id"],
+        "user_id": row["id"],  # 明示的にuser_idも返す
         "username": row["username"],
         "role": row["role"],
-        "farmer_id": str(row["id"]),  # 後方互換: user_id を farmer_id として使用
         "display_name": row["display_name"],
         "org_id": row["org_id"],
     }
@@ -175,13 +175,13 @@ def get_user_info(username: str) -> Optional[Dict[str, Any]]:
 # アクセス制御
 # =============================================================================
 
-def can_access_farmer(username: str, farmer_id: str) -> bool:
+def can_access_user_data(username: str, target_user_id: int) -> bool:
     """
-    特定の農家データへのアクセス権限をチェック
+    特定ユーザーのデータへのアクセス権限をチェック
 
     Args:
-        username: ユーザー名
-        farmer_id: 農家ID
+        username: ログインユーザー名
+        target_user_id: アクセス対象のユーザーID
 
     Returns:
         アクセス可能ならTrue
@@ -192,24 +192,33 @@ def can_access_farmer(username: str, farmer_id: str) -> bool:
 
     role = user.get("role")
 
-    # 管理者・JA職員は全農家にアクセス可能
+    # 管理者・JA職員は全ユーザーにアクセス可能
     if role in ADMIN_ROLES:
         return True
 
-    # 農家は自分のデータのみ
-    return user.get("farmer_id") == farmer_id
+    # 一般ユーザーは自分のデータのみ
+    return user.get("id") == target_user_id
 
 
-def get_accessible_farmers(username: str) -> List[str]:
+# 後方互換エイリアス
+def can_access_farmer(username: str, farmer_id: str) -> bool:
+    """後方互換用エイリアス。can_access_user_data() を使用してください。"""
+    try:
+        return can_access_user_data(username, int(farmer_id))
+    except (ValueError, TypeError):
+        return False
+
+
+def get_accessible_user_ids(username: str) -> List[int]:
     """
-    アクセス可能な農家IDのリストを取得
+    アクセス可能なユーザーIDのリストを取得
 
     Args:
         username: ユーザー名
 
     Returns:
-        アクセス可能な農家IDのリスト
-        管理者・JA職員の場合は ["*"]（全農家）
+        アクセス可能なユーザーIDのリスト
+        管理者・JA職員の場合は空リスト（全ユーザー = フィルタなし）
     """
     user = get_user_info(username)
     if not user:
@@ -217,16 +226,28 @@ def get_accessible_farmers(username: str) -> List[str]:
 
     role = user.get("role")
 
-    # 管理者・JA職員は全農家
+    # 管理者・JA職員は全ユーザー（フィルタなし）
     if role in ADMIN_ROLES:
-        return ["*"]
+        return []  # 空 = 全員
 
-    # 農家は自分のみ
-    farmer_id = user.get("farmer_id")
-    if farmer_id:
-        return [farmer_id]
+    # 一般ユーザーは自分のみ
+    user_id = user.get("id")
+    if user_id:
+        return [user_id]
 
     return []
+
+
+# 後方互換エイリアス
+def get_accessible_farmers(username: str) -> List[str]:
+    """後方互換用エイリアス。get_accessible_user_ids() を使用してください。"""
+    user = get_user_info(username)
+    if not user:
+        return []
+    if user.get("role") in ADMIN_ROLES:
+        return ["*"]
+    user_id = user.get("id")
+    return [str(user_id)] if user_id else []
 
 
 def is_admin_role(username: str) -> bool:
@@ -271,7 +292,6 @@ def add_user(
     username: str,
     password: str,
     role: str,
-    farmer_id: Optional[str] = None,
     display_name: Optional[str] = None,
     org_id: int = 2
 ) -> bool:
@@ -282,7 +302,6 @@ def add_user(
         username: ユーザー名
         password: パスワード
         role: ロール（admin, ja_staff, farmer）
-        farmer_id: 農家ID（後方互換用、無視される）
         display_name: 表示名
         org_id: 組織ID（デフォルト: 2=個人農家）
 

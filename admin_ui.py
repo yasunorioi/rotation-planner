@@ -22,6 +22,7 @@ from rotation_planner.common import (
 USERS_FILE = Path(__file__).parent / "data" / "users.json"
 DB_FILE = Path(__file__).parent / "data" / "rotation_planner.db"
 FUDE_CACHE_DIR = Path(__file__).parent / "data" / "fude_cache"
+SETTINGS_FILE = Path(__file__).parent / "data" / "settings.json"
 
 ROLES = [
     ("admin", "管理者"),
@@ -258,6 +259,44 @@ def get_db_tables_info() -> str:
 
     except Exception as e:
         return f"エラー: {str(e)}"
+
+
+# =============================================================================
+# システム設定
+# =============================================================================
+
+def load_settings() -> Dict[str, Any]:
+    """システム設定を読み込む"""
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"debug_mode": False}
+
+
+def save_settings(settings: Dict[str, Any]) -> None:
+    """システム設定を保存"""
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
+def get_debug_mode() -> bool:
+    """デバッグモードの状態を取得"""
+    settings = load_settings()
+    return settings.get("debug_mode", False)
+
+
+def set_debug_mode(enabled: bool) -> str:
+    """デバッグモードを設定"""
+    settings = load_settings()
+    settings["debug_mode"] = enabled
+    save_settings(settings)
+
+    status = "ON" if enabled else "OFF"
+    return f"✅ デバッグモードを {status} に変更しました。\n※ 変更を反映するにはアプリの再起動が必要です。"
 
 
 # =============================================================================
@@ -539,6 +578,44 @@ def create_admin_ui(current_username: str = "") -> Dict[str, Any]:
             - ユーザー追加・削除後
             - 大きなデータ変更後
             - 定期的（週1回など）
+            """)
+
+        # =================================================================
+        # システム設定タブ
+        # =================================================================
+        with gr.TabItem("🔧 システム設定"):
+            gr.Markdown("""
+            ### システム設定
+
+            アプリケーションの動作モードを変更できます。
+            """)
+
+            gr.Markdown("---")
+            gr.Markdown("### デバッグモード")
+
+            current_debug = get_debug_mode()
+            debug_checkbox = gr.Checkbox(
+                label="デバッグモードを有効にする",
+                value=current_debug,
+                info="有効時: ログイン画面にユーザー切り替えラジオボタンが表示されます"
+            )
+
+            debug_result = gr.Textbox(label="結果", interactive=False)
+
+            debug_checkbox.change(
+                fn=set_debug_mode,
+                inputs=[debug_checkbox],
+                outputs=[debug_result]
+            )
+
+            gr.Markdown("""
+            ---
+
+            **デバッグモードの機能:**
+            - ログイン画面にユーザー切り替えラジオボタン表示
+            - パスワード入力なしでログイン可能
+
+            **注意:** 本番環境では必ず OFF にしてください。
             """)
 
         # =================================================================

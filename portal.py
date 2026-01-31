@@ -765,7 +765,30 @@ def create_app():
 # =============================================================================
 
 import os
-DEBUG_MODE = os.environ.get('DEBUG', '1') == '1'  # デフォルトON、本番では DEBUG=0 で起動
+import json
+from pathlib import Path
+
+def _load_debug_mode() -> bool:
+    """デバッグモードを設定ファイルまたは環境変数から読み込む"""
+    # 1. 環境変数が明示的に設定されていればそれを使用
+    env_debug = os.environ.get('DEBUG')
+    if env_debug is not None:
+        return env_debug == '1'
+
+    # 2. 設定ファイルから読み込み
+    settings_file = Path(__file__).parent / "data" / "settings.json"
+    if settings_file.exists():
+        try:
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+                return settings.get("debug_mode", False)
+        except:
+            pass
+
+    # 3. デフォルトは OFF（本番向け）
+    return False
+
+DEBUG_MODE = _load_debug_mode()
 
 CUSTOM_HEAD = """
 <script>

@@ -106,11 +106,30 @@ python portal.py
 
 ## サーバーデプロイ（VPS）
 
+### ワンライナーインストール（推奨）
+
+```bash
+curl -sL https://raw.githubusercontent.com/yasunorioi/rotation-planner/main/scripts/install.sh | sudo bash
+```
+
+これだけで以下が自動実行されます：
+- 必要パッケージのインストール
+- アプリユーザー作成
+- リポジトリクローン
+- Python環境構築
+- DB初期化
+- systemd/nginx設定
+
 ### 動作確認済み環境
 
 - Debian 12 / Ubuntu 22.04
 - Python 3.11+
 - メモリ 512MB以上
+
+### 手動インストール（詳細）
+
+<details>
+<summary>クリックで展開</summary>
 
 ### 1. 必要パッケージのインストール
 
@@ -205,6 +224,8 @@ sudo nginx -t && sudo systemctl restart nginx
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d YOUR_DOMAIN
 ```
+
+</details>
 
 ## 運用コマンド
 

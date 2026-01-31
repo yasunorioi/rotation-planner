@@ -1634,6 +1634,114 @@ class PesticideRecordRepository:
 
 
 # =============================================================================
+# 発注テンプレート
+# =============================================================================
+
+class OrderTemplateRepository:
+    """発注テンプレートのCRUD操作"""
+
+    @staticmethod
+    def get_templates(user_id: int) -> List[Dict[str, Any]]:
+        """ユーザーのテンプレート一覧を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, name, type, items_json, notes, created_at, updated_at
+                FROM order_templates
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                if item.get("items_json"):
+                    item["items"] = json.loads(item["items_json"])
+                else:
+                    item["items"] = []
+                result.append(item)
+            return result
+
+    @staticmethod
+    def get_template(template_id: int) -> Optional[Dict[str, Any]]:
+        """テンプレートを取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, name, type, items_json, notes, created_at, updated_at
+                FROM order_templates
+                WHERE id = ?
+                """,
+                (template_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                item = dict(row)
+                if item.get("items_json"):
+                    item["items"] = json.loads(item["items_json"])
+                else:
+                    item["items"] = []
+                return item
+            return None
+
+    @staticmethod
+    def create_template(user_id: int, data: Dict[str, Any]) -> int:
+        """テンプレートを作成"""
+        with get_db() as conn:
+            items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+            cursor = conn.execute(
+                """
+                INSERT INTO order_templates (user_id, name, type, items_json, notes)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    data.get("name"),
+                    data.get("type", "custom"),
+                    items_json,
+                    data.get("notes"),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    @staticmethod
+    def update_template(template_id: int, data: Dict[str, Any]) -> bool:
+        """テンプレートを更新"""
+        with get_db() as conn:
+            items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+            cursor = conn.execute(
+                """
+                UPDATE order_templates
+                SET name = ?, type = ?, items_json = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    data.get("name"),
+                    data.get("type", "custom"),
+                    items_json,
+                    data.get("notes"),
+                    template_id,
+                )
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete_template(template_id: int) -> bool:
+        """テンプレートを削除"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM order_templates WHERE id = ?",
+                (template_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+# =============================================================================
 # 動作確認用
 # =============================================================================
 

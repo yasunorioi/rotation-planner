@@ -81,6 +81,7 @@ from rotation_planner.common.db_access import (
     PesticideRegistryRepository,
     PesticideUsageRepository,
     PesticideRecordRepository,
+    OrderTemplateRepository,
     MigrationUtils,
 )
 

@@ -58,13 +58,13 @@ class TestFieldRepository:
         # 存在しないユーザーは空リスト
         assert isinstance(fields_user999, list)
 
-    def test_get_field_by_id(self):
-        """IDでほ場を取得できること"""
+    def test_get_field_by_code(self):
+        """コードでほ場を取得できること"""
         fields = FieldRepository.get_fields(user_id=1)
         if fields:
-            field_id = fields[0].get("id") or fields[0].get("field_id")
-            if field_id:
-                field = FieldRepository.get_field_by_id(field_id, user_id=1)
+            field_code = fields[0].get("field_code")
+            if field_code:
+                field = FieldRepository.get_field_by_code(user_id=1, field_code=field_code)
                 assert field is not None
 
 

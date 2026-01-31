@@ -498,8 +498,7 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
     gr.Markdown("## 📥 エクスポート")
 
     with gr.Row():
-        export_btn = gr.Button("📥 CSV", variant="primary")
-        export_kml_btn = gr.Button("📥 KML", variant="secondary")
+        export_kml_btn = gr.Button("📥 KML", variant="primary")
         export_kmz_btn = gr.Button("📥 KMZ", variant="secondary")
 
     export_file = gr.File(label="ダウンロード")
@@ -544,12 +543,6 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
         fn=refresh_map,
         inputs=[user_state],
         outputs=[map_html]
-    )
-
-    export_btn.click(
-        fn=export_csv_with_state,
-        inputs=[user_state],
-        outputs=[export_file, export_message]
     )
 
     export_kml_btn.click(

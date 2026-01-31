@@ -73,6 +73,7 @@ from rotation_planner.common.db_access import (
     PesticideMasterRepository,
     CropMasterRepository,
     UserCropRepository,
+    PesticideOrderRepository,
     MigrationUtils,
 )
 
@@ -147,6 +148,7 @@ __all__ = [
     "PesticideMasterRepository",
     "CropMasterRepository",
     "UserCropRepository",
+    "PesticideOrderRepository",
     "MigrationUtils",
     # モデル
     "User",

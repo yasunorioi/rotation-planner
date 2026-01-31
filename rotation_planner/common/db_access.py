@@ -264,6 +264,97 @@ class CropHistoryRepository:
             return rows_to_list(cursor.fetchall())
 
     @staticmethod
+    def get_all_history_for_user(user_id: int) -> List[Dict[str, Any]]:
+        """
+        ユーザーの全ほ場の履歴を取得（マトリックス表示用）
+
+        Args:
+            user_id: ユーザーID
+
+        Returns:
+            履歴データのリスト。各要素は:
+            - field_id: ほ場ID（DB主キー）
+            - field_code: ほ場コード（表示用）
+            - field_name: ほ場名
+            - year: 年度（R7, R8など）
+            - crop: 作物名
+            - is_inferred: 推論フラグ（1なら推論で補完）
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT
+                    ch.field_id,
+                    f.field_code,
+                    f.name as field_name,
+                    ch.year,
+                    ch.crop,
+                    ch.is_inferred
+                FROM crop_history ch
+                INNER JOIN fields f ON f.id = ch.field_id
+                WHERE f.user_id = ?
+                ORDER BY f.field_code, ch.year
+            """, (user_id,))
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def delete_history(field_id: int, year: str) -> bool:
+        """
+        特定ほ場・年度の履歴を削除
+
+        Args:
+            field_id: ほ場ID
+            year: 年度（R7, R8など）
+
+        Returns:
+            削除成功ならTrue
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                DELETE FROM crop_history
+                WHERE field_id = ? AND year = ?
+            """, (field_id, year))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def bulk_update_history(updates: List[Dict[str, Any]]) -> int:
+        """
+        複数レコードの一括更新（トランザクション内で実行）
+
+        Args:
+            updates: 更新データのリスト。各要素は:
+                - field_id: ほ場ID
+                - year: 年度
+                - crop: 作物名（空文字の場合は削除）
+
+        Returns:
+            更新・挿入された件数
+        """
+        count = 0
+        with get_db() as conn:
+            for update in updates:
+                field_id = update.get('field_id')
+                year = update.get('year')
+                crop = update.get('crop', '').strip()
+
+                if not field_id or not year:
+                    continue
+
+                if not crop:
+                    # 空の場合は削除
+                    conn.execute("""
+                        DELETE FROM crop_history
+                        WHERE field_id = ? AND year = ?
+                    """, (field_id, year))
+                else:
+                    # INSERT OR REPLACE で追加/更新
+                    conn.execute("""
+                        INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
+                        VALUES (?, ?, ?, 0)
+                    """, (field_id, year, crop))
+                count += 1
+        return count
+
+    @staticmethod
     def add_history(field_id: int, year: str, crop: str, is_inferred: bool = False) -> int:
         """作付履歴を追加"""
         with get_db() as conn:
@@ -885,6 +976,164 @@ class UserCropRepository:
                 return row[0]
 
             return None
+
+
+# =============================================================================
+# 農薬発注リポジトリ
+# =============================================================================
+
+class PesticideOrderRepository:
+    """農薬発注リストのCRUD操作"""
+
+    @staticmethod
+    def get_orders(user_id: int) -> List[Dict[str, Any]]:
+        """
+        ユーザーの発注リスト一覧を取得
+
+        Args:
+            user_id: ユーザーID
+
+        Returns:
+            発注リストのリスト（id, name, target_year, status, created_at, updated_at）
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT id, name, target_year, status, created_at, updated_at
+                FROM pesticide_orders
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+            """, (user_id,))
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def get_order(order_id: int) -> Optional[Dict[str, Any]]:
+        """
+        発注リスト詳細を取得（order_data_jsonをdictに展開）
+
+        Args:
+            order_id: 発注ID
+
+        Returns:
+            発注リスト詳細（見つからない場合はNone）
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM pesticide_orders WHERE id = ?
+            """, (order_id,))
+            order = row_to_dict(cursor.fetchone())
+            if not order:
+                return None
+
+            # order_data_json をパース
+            if order.get('order_data_json'):
+                order['order_data'] = json.loads(order['order_data_json'])
+            else:
+                order['order_data'] = {}
+
+            return order
+
+    @staticmethod
+    def create_order(user_id: int, data: Dict[str, Any]) -> int:
+        """
+        発注リストを作成
+
+        Args:
+            user_id: ユーザーID
+            data: 発注データ
+                - name: 発注リスト名（必須）
+                - target_year: 対象年（必須）
+                - rotation_plan_id: 輪作計画ID（任意）
+                - area_unit: 面積単位（デフォルト: 'ha'）
+                - order_data: 発注内容（dict、JSON化して保存）
+
+        Returns:
+            作成された発注リストのID
+        """
+        with get_db() as conn:
+            order_data_json = json.dumps(data.get('order_data', {}), ensure_ascii=False)
+
+            cursor = conn.execute("""
+                INSERT INTO pesticide_orders
+                (user_id, name, rotation_plan_id, target_year, area_unit, order_data_json, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'draft')
+            """, (
+                user_id,
+                data['name'],
+                data.get('rotation_plan_id'),
+                data['target_year'],
+                data.get('area_unit', 'ha'),
+                order_data_json
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    @staticmethod
+    def update_order(order_id: int, data: Dict[str, Any]) -> bool:
+        """
+        発注リストを更新
+
+        Args:
+            order_id: 発注ID
+            data: 更新データ（name, target_year, area_unit, order_data, status等）
+
+        Returns:
+            更新成功ならTrue
+        """
+        with get_db() as conn:
+            updates = []
+            values = []
+
+            if 'name' in data:
+                updates.append("name = ?")
+                values.append(data['name'])
+
+            if 'target_year' in data:
+                updates.append("target_year = ?")
+                values.append(data['target_year'])
+
+            if 'area_unit' in data:
+                updates.append("area_unit = ?")
+                values.append(data['area_unit'])
+
+            if 'order_data' in data:
+                updates.append("order_data_json = ?")
+                values.append(json.dumps(data['order_data'], ensure_ascii=False))
+
+            if 'status' in data:
+                updates.append("status = ?")
+                values.append(data['status'])
+
+            if not updates:
+                return False
+
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(order_id)
+
+            conn.execute(f"""
+                UPDATE pesticide_orders
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, tuple(values))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete_order(order_id: int) -> bool:
+        """
+        発注リストを削除
+
+        Args:
+            order_id: 発注ID
+
+        Returns:
+            削除成功ならTrue
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                DELETE FROM pesticide_orders WHERE id = ?
+            """, (order_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
 
 # =============================================================================

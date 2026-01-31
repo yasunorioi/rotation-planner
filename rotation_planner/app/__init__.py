@@ -10,6 +10,7 @@ from .constraints import (
     FIXED_FORBIDDEN_TRANSITIONS,
     DEFAULT_PREFERRED_TRANSITIONS,
     DEFAULT_MAIN_CROPS,
+    get_default_crops,
     Constraints,
     build_constraints_table,
     load_constraints_csv,
@@ -57,6 +58,7 @@ __all__ = [
     'FIXED_FORBIDDEN_TRANSITIONS',
     'DEFAULT_PREFERRED_TRANSITIONS',
     'DEFAULT_MAIN_CROPS',
+    'get_default_crops',
     'UNKNOWN_MARKER',
     'COLUMN_ALIASES',
     # データクラス

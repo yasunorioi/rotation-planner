@@ -118,7 +118,7 @@ def export_rotation_plan_csv(
     # ファイル名生成
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     plan_name = plan.get("name", "plan").replace(" ", "_")
-    filename = f"rotation_plan_{plan_name}_{timestamp}.csv"
+    filename = f"輪作計画_{plan_name}_{timestamp}.csv"
     filepath = os.path.join(CSV_OUTPUT_DIR, filename)
 
     # CSV書き込み（UTF-8 with BOM）
@@ -241,7 +241,7 @@ def export_pesticide_order_csv(
 
     # ファイル名生成
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"pesticide_order_{timestamp}.csv"
+    filename = f"農薬発注_{timestamp}.csv"
     filepath = os.path.join(CSV_OUTPUT_DIR, filename)
 
     # CSV書き込み（UTF-8 with BOM）
@@ -310,7 +310,7 @@ def export_ja_aggregate_pesticide_csv(
 
         # ファイル名生成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"ja_pesticide_aggregate_{timestamp}.csv"
+        filename = f"JA農薬集計_{timestamp}.csv"
         filepath = os.path.join(CSV_OUTPUT_DIR, filename)
 
         # DataFrameをCSV出力
@@ -368,7 +368,7 @@ def export_fields_csv(user_state: Dict[str, Any]) -> Tuple[Optional[str], str]:
 
     # ファイル名生成
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"fields_{timestamp}.csv"
+    filename = f"ほ場一覧_{timestamp}.csv"
     filepath = os.path.join(CSV_OUTPUT_DIR, filename)
 
     # CSV書き込み（UTF-8 with BOM）- 輪作計画メーカー形式

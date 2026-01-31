@@ -12,10 +12,57 @@ from dataclasses import dataclass, field
 # 定数・デフォルト値
 # =============================================================================
 
-DEFAULT_CROPS = [
+# ハードコードのフォールバック値（DB接続できない場合に使用）
+_FALLBACK_CROPS = [
     "春小麦", "秋小麦", "大豆", "デントコーン", "WCS",
     "てんさい", "馬鈴薯", "キャベツ", "にんじん", "だいこん"
 ]
+
+
+def get_default_crops(user_id: int = None) -> List[str]:
+    """
+    作物リストを取得する。
+
+    Args:
+        user_id: ユーザーID（指定時はユーザーの選択作物のみ返す）
+
+    Returns:
+        作物名のリスト
+
+    優先順位:
+        1. user_idがあればユーザーの選択作物（user_crops）のみ
+        2. user_idがなければ全マスタ（crop_master）
+        3. ハードコードのフォールバック
+    """
+    try:
+        from rotation_planner.common import CropMasterRepository, UserCropRepository
+    except ImportError:
+        return _FALLBACK_CROPS
+
+    # 1. ユーザーIDがあれば、ユーザーの選択作物のみを返す
+    if user_id:
+        try:
+            crops = UserCropRepository.get_user_crops(user_id)
+            # user_cropsが空でも全マスタにフォールバックしない
+            # ユーザーは自分の作物だけ見たい
+            return [c.get("custom_name") or c.get("name", "") for c in crops if c.get("custom_name") or c.get("name")]
+        except Exception:
+            return []  # エラー時は空リスト
+
+    # 2. user_idがない場合のみ全マスタから取得
+    try:
+        crops = CropMasterRepository.get_all(active_only=True)
+        if crops:
+            return [c.get("name", "") for c in crops if c.get("name")]
+    except Exception:
+        pass
+
+    # 3. フォールバック
+    return _FALLBACK_CROPS
+
+
+# 後方互換性のため、デフォルト値も維持（モジュール読み込み時に評価）
+DEFAULT_CROPS = get_default_crops()
 
 DEFAULT_CONSTRAINTS = {
     "春小麦":     {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},

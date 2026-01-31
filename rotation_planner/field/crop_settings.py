@@ -121,7 +121,7 @@ def save_master_crops(selected_crops: List[str], user_state: Dict[str, Any]) -> 
     # 保存（カスタム作物は削除しない）
     UserCropRepository.set_user_crops(user_id, crop_ids)
 
-    return format_alert(f"✅ マスタから{len(crop_ids)}種類の作物を設定しました", "success")
+    return format_alert(f"✅ 自動保存しました（{len(crop_ids)}種類）", "success")
 
 
 def add_custom_crop(
@@ -250,9 +250,6 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
         value=[],
     )
 
-    with gr.Row():
-        save_master_btn = gr.Button("💾 マスタ作物を保存", variant="primary")
-
     # ============= カスタム作物の追加 =============
     gr.Markdown("---")
     gr.Markdown("""
@@ -297,8 +294,8 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
 
     # ============= イベントハンドラ =============
 
-    # マスタ作物保存
-    save_master_btn.click(
+    # マスタ作物の自動保存（チェックボックス変更時）
+    crop_checkboxes.change(
         fn=save_master_crops,
         inputs=[crop_checkboxes, user_state],
         outputs=[message]
@@ -330,7 +327,6 @@ def create_crop_settings_ui(user_state: gr.State) -> Dict[str, Any]:
         "custom_crops_table": custom_crops_table,
         "message": message,
         "load_fn": load_crop_settings,
-        "save_master_btn": save_master_btn,
         "add_custom_btn": add_custom_btn,
     }
 

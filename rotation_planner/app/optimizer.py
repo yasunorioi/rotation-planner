@@ -781,17 +781,36 @@ def run_sensitivity_analysis(fields: List[Field], past_years: List[str],
 
 def run_optimization(csv_file, area_unit, n_years, crop_text, constraints_table,
                     forbidden_text, preferred_text, main_crops_text, unknown_mode,
-                    tensai_required, precision_mode, infer_unknown_flag, district_grouping):
-    """最適化を実行"""
+                    tensai_required, precision_mode, infer_unknown_flag, district_grouping,
+                    fields: Optional[List[Field]] = None,
+                    past_years: Optional[List[str]] = None):
+    """最適化を実行
+
+    Args:
+        csv_file: CSVファイル（Gradioアップロード）
+        area_unit: 面積単位
+        ... (その他の既存引数)
+        fields: ほ場リスト（DB等から直接渡す場合）
+        past_years: 過去年リスト（fieldsと一緒に渡す）
+
+    Note:
+        - csv_file が渡された場合: 従来通りCSVから読み込み
+        - fields/past_years が渡された場合: 直接使用（DB対応）
+        - 両方Noneの場合: エラー
+    """
     from .utils import infer_unknown_crops
 
-    if csv_file is None:
-        return None, None, None, "エラー: CSVファイルをアップロードしてください"
-
-    # CSV読み込み
-    fields, past_years, error = load_csv(csv_file.name, area_unit)
-    if error:
-        return None, None, None, error
+    # データソースの決定
+    if fields is not None and past_years is not None:
+        # DB等から直接渡された場合はそのまま使用
+        pass
+    elif csv_file is not None:
+        # CSV読み込み（従来の動作）
+        fields, past_years, error = load_csv(csv_file.name, area_unit)
+        if error:
+            return None, None, None, error
+    else:
+        return None, None, None, "エラー: CSVファイルまたはほ場データを指定してください"
 
     if not fields:
         return None, None, None, "エラー: ほ場データがありません"
@@ -853,7 +872,7 @@ def run_optimization(csv_file, area_unit, n_years, crop_text, constraints_table,
 
     # CSV出力
     csv_content = generate_csv_content(field_df)
-    csv_path = "/tmp/rotation_plan.csv"
+    csv_path = "/tmp/輪作計画.csv"
     with open(csv_path, 'w', encoding='utf-8-sig') as f:
         f.write(csv_content)
 

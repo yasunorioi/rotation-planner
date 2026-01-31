@@ -12,6 +12,7 @@ from .constraints import (
     DEFAULT_CROPS,
     DEFAULT_PREFERRED_TRANSITIONS,
     DEFAULT_MAIN_CROPS,
+    get_default_crops,
     build_constraints_table,
     update_constraints_table,
     update_constraints_from_csv
@@ -72,8 +73,8 @@ def create_app(auth_enabled: bool = False, auth_func=None):
         app.load(on_load, outputs=[user_state, user_info_display])
 
         with gr.Row():
-            gr.DownloadButton("📥 サンプルCSV", value=os.path.join(APP_DIR, "template_example.csv"))
-            gr.DownloadButton("📥 空テンプレート", value=os.path.join(APP_DIR, "template_empty.csv"))
+            gr.DownloadButton("📥 サンプルCSV", value=os.path.join(APP_DIR, "サンプルほ場.csv"))
+            gr.DownloadButton("📥 空テンプレート", value=os.path.join(APP_DIR, "ほ場テンプレート.csv"))
 
         gr.Markdown("""
         ### ⛔ 固定の禁止遷移
@@ -139,11 +140,11 @@ def create_app(auth_enabled: bool = False, auth_func=None):
                 with gr.Row():
                     constraints_sample_btn = gr.DownloadButton(
                         "📥 制約サンプルCSV",
-                        value="constraints_example.csv"
+                        value="制約サンプル.csv"
                     )
                     constraints_empty_btn = gr.DownloadButton(
                         "📥 制約テンプレート",
-                        value="constraints_empty.csv"
+                        value="制約テンプレート.csv"
                     )
 
                 constraints_file = gr.File(

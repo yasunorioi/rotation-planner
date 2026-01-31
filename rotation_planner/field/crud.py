@@ -31,6 +31,9 @@ from rotation_planner.common import (
 # 同一パッケージの地図モジュール
 from .map import calculate_area_from_coords, m2_to_ha
 
+# 輪作計画アプリのField dataclass
+from rotation_planner.app.utils import Field
+
 
 # =============================================================================
 # ヘルパー関数
@@ -118,6 +121,72 @@ def get_user_fields(user_id: int) -> List[Dict[str, Any]]:
     if not user_id:
         return []
     return FieldRepository.get_fields(user_id)
+
+
+def get_fields_with_history(user_id: int) -> Tuple[List[Field], List[str], str]:
+    """
+    ユーザーのほ場一覧を作付履歴付きで取得（輪作計画用）
+
+    DBからほ場データと作付履歴を取得し、optimizer.pyが期待する
+    Field dataclass形式で返す。CSV経由の変換を省略できる。
+
+    Args:
+        user_id: ユーザーID
+
+    Returns:
+        (fields, years, error) のタプル:
+        - fields: Field dataclassのリスト
+        - years: 年列リスト（例: ["R5", "R6", "R7"]）
+        - error: エラーメッセージ（成功時は空文字列）
+    """
+    if not user_id:
+        return [], [], "エラー: ユーザーIDが指定されていません"
+
+    # ほ場一覧を取得
+    raw_fields = FieldRepository.get_fields(user_id)
+    if not raw_fields:
+        return [], [], "エラー: 登録されたほ場がありません"
+
+    fields: List[Field] = []
+    all_years: set = set()
+
+    for f in raw_fields:
+        field_id = f.get("id")
+
+        # 作付履歴を取得
+        history_records = CropHistoryRepository.get_history(field_id)
+
+        # history を Dict[str, str] 形式に変換（year -> crop）
+        history: Dict[str, str] = {}
+        has_unknown = False
+        for record in history_records:
+            year = record.get("year", "")
+            crop = record.get("crop", "")
+            if year:
+                history[year] = crop if crop else "UNKNOWN"
+                all_years.add(year)
+                if not crop or crop == "UNKNOWN":
+                    has_unknown = True
+
+        # Field dataclass に変換
+        area_ha = f.get("area_ha", 0.0)
+        if area_ha == 0 and f.get("area_a"):
+            area_ha = f.get("area_a", 0) / 100
+
+        fields.append(Field(
+            field_id=f.get("field_code", f"F{field_id:03d}"),
+            district=f.get("district", ""),
+            name=f.get("name", ""),
+            area_ha=float(area_ha),
+            history=history,
+            has_unknown=has_unknown,
+            beet_forbidden=bool(f.get("beet_forbidden", False))
+        ))
+
+    # 年列をソート（R数字形式）
+    years = sorted(list(all_years), key=lambda y: int(y[1:]) if y.startswith("R") and y[1:].isdigit() else 0)
+
+    return fields, years, ""
 
 
 def fields_to_dataframe(fields: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -385,7 +454,7 @@ def export_csv_with_state(user_state: Dict[str, Any]) -> Tuple[Optional[str], st
         lines.append(f"{f.get('field_code', '')},{f.get('district', '')},{f.get('name', '')},{area_a:.2f},{beet}")
 
     csv_content = "\n".join(lines)
-    csv_path = "/tmp/field_register_export.csv"
+    csv_path = "/tmp/ほ場一覧.csv"
 
     with open(csv_path, 'w', encoding='utf-8-sig') as file:
         file.write(csv_content)
@@ -406,6 +475,7 @@ __all__ = [
     "get_next_field_id",
     # データ取得
     "get_user_fields",
+    "get_fields_with_history",
     "fields_to_dataframe",
     "get_fields_json_for_map",
     # CRUD操作

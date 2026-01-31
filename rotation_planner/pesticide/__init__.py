@@ -48,10 +48,22 @@ from .master import (
 
 from .ui import (
     create_pesticide_order_ui,
-    process_order,
-    get_available_years,
+    process_order_db,
+    get_available_years_from_db,
     get_all_farmers_orders,
     get_aggregate_pesticide_orders,
+)
+
+from .rotation import (
+    RotationPlanRepository,
+    get_user_plans_for_dropdown,
+    load_rotation_plan_from_db,
+    has_saved_plans,
+)
+
+from .pdf_export import (
+    generate_pesticide_order_pdf,
+    check_pdf_support,
 )
 
 __all__ = [
@@ -73,10 +85,18 @@ __all__ = [
     "get_pesticides_for_crop",
     # ui
     "create_pesticide_order_ui",
-    "process_order",
-    "get_available_years",
+    "process_order_db",
+    "get_available_years_from_db",
     "get_all_farmers_orders",
     "get_aggregate_pesticide_orders",
+    # rotation
+    "RotationPlanRepository",
+    "get_user_plans_for_dropdown",
+    "load_rotation_plan_from_db",
+    "has_saved_plans",
+    # pdf_export
+    "generate_pesticide_order_pdf",
+    "check_pdf_support",
 ]
 
 __version__ = "1.0.0"

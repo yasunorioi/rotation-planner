@@ -66,6 +66,12 @@ from .pdf_export import (
     check_pdf_support,
 )
 
+from .csv_io import (
+    export_order_csv,
+    import_order_csv,
+    merge_with_calculated,
+)
+
 __all__ = [
     # calculator
     "calculate_pesticide_requirements",
@@ -97,6 +103,10 @@ __all__ = [
     # pdf_export
     "generate_pesticide_order_pdf",
     "check_pdf_support",
+    # csv_io
+    "export_order_csv",
+    "import_order_csv",
+    "merge_with_calculated",
 ]
 
 __version__ = "1.0.0"

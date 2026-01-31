@@ -100,11 +100,13 @@ def rows_to_list(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
 
 def init_db(schema_path: Optional[Path] = None) -> None:
     """
-    データベースを初期化（スキーマを適用）
+    データベースを初期化（スキーマを適用 + 初期ユーザー作成）
 
     Args:
         schema_path: スキーマファイルのパス（省略時はデフォルト）
     """
+    import hashlib
+
     if schema_path is None:
         schema_path = Path(__file__).parent.parent.parent / "db_schema.sql"
 
@@ -116,6 +118,27 @@ def init_db(schema_path: Optional[Path] = None) -> None:
 
     with get_db() as conn:
         conn.executescript(schema_sql)
+
+        # 初期ユーザーを作成（存在しない場合のみ）
+        initial_users = [
+            ("admin", "admin123", "管理者", "admin", 1),
+            ("ja_staff", "ja123", "JA職員", "ja_staff", 1),
+            ("farmer_demo", "demo123", "デモ農家", "farmer", 2),
+        ]
+
+        for username, password, display_name, role, org_id in initial_users:
+            # 既存チェック
+            cursor = conn.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (username,)
+            )
+            if cursor.fetchone() is None:
+                password_hash = hashlib.sha256(password.encode()).hexdigest()
+                conn.execute(
+                    """INSERT INTO users (username, password_hash, display_name, role, org_id)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    (username, password_hash, display_name, role, org_id)
+                )
 
 
 def check_db_exists() -> bool:

@@ -819,6 +819,10 @@ if (DEBUG) console.log('[PORTAL] Debug mode ON');
 """
 
 if __name__ == "__main__":
+    # DB初期化（テーブルと初期ユーザー作成）
+    from rotation_planner.common import init_db
+    init_db()
+
     app = create_app()
     import os
     # HF Spaces環境では認証なし・SSRなしで起動

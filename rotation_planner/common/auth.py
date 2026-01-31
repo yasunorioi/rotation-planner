@@ -1,5 +1,5 @@
 """
-認証モジュール - Gradio標準認証 + ユーザーマスタJSON
+認証モジュール - Gradio標準認証 + SQLite DB
 
 使用方法:
     from rotation_planner.common.auth import authenticate, get_user_info, can_access_farmer
@@ -16,19 +16,16 @@
         pass
 """
 
-import json
 import hashlib
-from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+
+from .db import get_db, row_to_dict, rows_to_list
 
 
 # =============================================================================
 # 設定
 # =============================================================================
-
-# ユーザーマスタファイル（rotation_planner_ui/data/users.json）
-USERS_FILE = Path(__file__).parent.parent.parent / "data" / "users.json"
 
 # ロール定義
 ROLE_ADMIN = "admin"
@@ -40,42 +37,69 @@ ADMIN_ROLES = {ROLE_ADMIN, ROLE_JA_STAFF}
 
 
 # =============================================================================
-# ユーザー管理
+# ユーザー管理（DB版）
 # =============================================================================
 
 def load_users() -> List[Dict[str, Any]]:
     """
-    ユーザー一覧を読み込み
+    ユーザー一覧をDBから読み込み
 
     Returns:
         ユーザー情報のリスト
     """
-    if not USERS_FILE.exists():
-        return []
-
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    return data.get("users", [])
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id, username, password_hash, display_name, role, org_id, is_active "
+            "FROM users WHERE is_active = 1 ORDER BY id"
+        )
+        return rows_to_list(cursor.fetchall())
 
 
 def save_users(users: List[Dict[str, Any]]) -> None:
     """
-    ユーザー一覧を保存
+    ユーザー一覧をDBに保存（後方互換用 - 個別操作を推奨）
 
     Args:
         users: ユーザー情報のリスト
     """
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with get_db() as conn:
+        for user in users:
+            # usernameで既存チェック
+            cursor = conn.execute(
+                "SELECT id FROM users WHERE username = ?",
+                (user.get("username"),)
+            )
+            existing = cursor.fetchone()
 
-    data = {
-        "version": "1.0",
-        "updated_at": datetime.now().isoformat(),
-        "users": users
-    }
-
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+            if existing:
+                # 更新
+                conn.execute(
+                    """UPDATE users SET
+                        password_hash = ?,
+                        display_name = ?,
+                        role = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE username = ?""",
+                    (
+                        user.get("password_hash"),
+                        user.get("display_name", user.get("username")),
+                        user.get("role"),
+                        user.get("username"),
+                    )
+                )
+            else:
+                # 新規
+                conn.execute(
+                    """INSERT INTO users (username, password_hash, display_name, role, org_id)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        user.get("username"),
+                        user.get("password_hash"),
+                        user.get("display_name", user.get("username")),
+                        user.get("role"),
+                        user.get("org_id", 2),  # デフォルト: 個人農家
+                    )
+                )
 
 
 def hash_password(password: str) -> str:
@@ -97,7 +121,7 @@ def hash_password(password: str) -> str:
 
 def authenticate(username: str, password: str) -> bool:
     """
-    Gradio auth関数 - ユーザー認証
+    Gradio auth関数 - ユーザー認証（DB版）
 
     Args:
         username: ユーザー名
@@ -106,19 +130,19 @@ def authenticate(username: str, password: str) -> bool:
     Returns:
         認証成功ならTrue
     """
-    users = load_users()
     pw_hash = hash_password(password)
 
-    for user in users:
-        if user.get("username") == username and user.get("password_hash") == pw_hash:
-            return True
-
-    return False
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id FROM users WHERE username = ? AND password_hash = ? AND is_active = 1",
+            (username, pw_hash)
+        )
+        return cursor.fetchone() is not None
 
 
 def get_user_info(username: str) -> Optional[Dict[str, Any]]:
     """
-    ユーザー情報を取得
+    ユーザー情報を取得（DB版）
 
     Args:
         username: ユーザー名
@@ -126,17 +150,25 @@ def get_user_info(username: str) -> Optional[Dict[str, Any]]:
     Returns:
         ユーザー情報（見つからない場合はNone）
     """
-    for user in load_users():
-        if user.get("username") == username:
-            # パスワードハッシュは返さない
-            return {
-                "username": user.get("username"),
-                "role": user.get("role"),
-                "farmer_id": user.get("farmer_id"),
-                "display_name": user.get("display_name"),
-            }
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT id, username, display_name, role, org_id FROM users "
+            "WHERE username = ? AND is_active = 1",
+            (username,)
+        )
+        row = cursor.fetchone()
 
-    return None
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "farmer_id": str(row["id"]),  # 後方互換: user_id を farmer_id として使用
+        "display_name": row["display_name"],
+        "org_id": row["org_id"],
+    }
 
 
 # =============================================================================
@@ -240,46 +272,51 @@ def add_user(
     password: str,
     role: str,
     farmer_id: Optional[str] = None,
-    display_name: Optional[str] = None
+    display_name: Optional[str] = None,
+    org_id: int = 2
 ) -> bool:
     """
-    新規ユーザーを追加
+    新規ユーザーを追加（DB版）
 
     Args:
         username: ユーザー名
         password: パスワード
         role: ロール（admin, ja_staff, farmer）
-        farmer_id: 農家ID（role=farmerの場合のみ）
+        farmer_id: 農家ID（後方互換用、無視される）
         display_name: 表示名
+        org_id: 組織ID（デフォルト: 2=個人農家）
 
     Returns:
         追加成功ならTrue
     """
-    users = load_users()
-
-    # 既存ユーザーチェック
-    for user in users:
-        if user.get("username") == username:
+    with get_db() as conn:
+        # 既存ユーザーチェック
+        cursor = conn.execute(
+            "SELECT id FROM users WHERE username = ?",
+            (username,)
+        )
+        if cursor.fetchone():
             return False
 
-    new_user = {
-        "username": username,
-        "password_hash": hash_password(password),
-        "role": role,
-        "farmer_id": farmer_id,
-        "display_name": display_name or username,
-        "created_at": datetime.now().isoformat()
-    }
-
-    users.append(new_user)
-    save_users(users)
+        # 新規追加
+        conn.execute(
+            """INSERT INTO users (username, password_hash, display_name, role, org_id)
+            VALUES (?, ?, ?, ?, ?)""",
+            (
+                username,
+                hash_password(password),
+                display_name or username,
+                role,
+                org_id,
+            )
+        )
 
     return True
 
 
 def update_password(username: str, new_password: str) -> bool:
     """
-    パスワードを更新
+    パスワードを更新（DB版）
 
     Args:
         username: ユーザー名
@@ -288,20 +325,41 @@ def update_password(username: str, new_password: str) -> bool:
     Returns:
         更新成功ならTrue
     """
-    users = load_users()
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE username = ? AND is_active = 1""",
+            (hash_password(new_password), username)
+        )
+        return cursor.rowcount > 0
 
-    for user in users:
-        if user.get("username") == username:
-            user["password_hash"] = hash_password(new_password)
-            save_users(users)
-            return True
 
-    return False
+def update_user_role(username: str, new_role: str) -> bool:
+    """
+    ユーザーのロールを更新（DB版）
+
+    Args:
+        username: ユーザー名
+        new_role: 新しいロール
+
+    Returns:
+        更新成功ならTrue
+    """
+    if new_role not in (ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER):
+        return False
+
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE username = ? AND is_active = 1""",
+            (new_role, username)
+        )
+        return cursor.rowcount > 0
 
 
 def delete_user(username: str) -> bool:
     """
-    ユーザーを削除
+    ユーザーを削除（論理削除）（DB版）
 
     Args:
         username: ユーザー名
@@ -309,13 +367,24 @@ def delete_user(username: str) -> bool:
     Returns:
         削除成功ならTrue
     """
-    users = load_users()
-    original_count = len(users)
+    with get_db() as conn:
+        cursor = conn.execute(
+            """UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE username = ? AND is_active = 1""",
+            (username,)
+        )
+        return cursor.rowcount > 0
 
-    users = [u for u in users if u.get("username") != username]
 
-    if len(users) < original_count:
-        save_users(users)
-        return True
+def get_admin_count() -> int:
+    """
+    アクティブな管理者の数を取得
 
-    return False
+    Returns:
+        管理者の数
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1"
+        )
+        return cursor.fetchone()[0]

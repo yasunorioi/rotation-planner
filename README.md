@@ -258,8 +258,7 @@ rotation_planner_ui/
 │   ├── data_management/        # CSVインポート/エクスポート
 │   └── common/                 # 共通モジュール（DB・認証・ユーティリティ）
 ├── data/                       # データディレクトリ
-│   ├── rotation_planner.db     # SQLiteデータベース
-│   ├── users.json              # ユーザーマスタ
+│   ├── rotation_planner.db     # SQLiteデータベース（ユーザー情報含む）
 │   ├── settings.json           # システム設定
 │   └── fude_cache/             # 筆ポリゴンキャッシュ
 ├── scripts/                    # マイグレーションスクリプト

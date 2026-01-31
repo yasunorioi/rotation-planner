@@ -11,7 +11,11 @@ from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 
 from rotation_planner.common import (
-    load_users, save_users, hash_password,
+    load_users, hash_password, add_user as auth_add_user,
+    update_password as auth_update_password,
+    update_user_role as auth_update_user_role,
+    delete_user as auth_delete_user,
+    get_admin_count,
     ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER,
 )
 
@@ -19,7 +23,6 @@ from rotation_planner.common import (
 # 定数
 # =============================================================================
 
-USERS_FILE = Path(__file__).parent / "data" / "users.json"
 DB_FILE = Path(__file__).parent / "data" / "rotation_planner.db"
 FUDE_CACHE_DIR = Path(__file__).parent / "data" / "fude_cache"
 SETTINGS_FILE = Path(__file__).parent / "data" / "settings.json"
@@ -39,7 +42,7 @@ ROLE_DISPLAY = {r[0]: r[1] for r in ROLES}
 # =============================================================================
 
 def get_users_for_display() -> List[List[Any]]:
-    """ユーザー一覧を表示用に取得"""
+    """ユーザー一覧を表示用に取得（DB版）"""
     users = load_users()
     display_data = []
 
@@ -49,15 +52,31 @@ def get_users_for_display() -> List[List[Any]]:
             user.get("username", ""),
             ROLE_DISPLAY.get(user.get("role", ""), user.get("role", "")),
             user.get("display_name", ""),
-            user.get("farmer_id", ""),
+            str(user.get("id", "")),  # user_id を farmer_id として表示
             "●●●●●●"  # パスワードは非表示
         ])
 
     return display_data
 
 
+def _get_username_by_row(row_index: int) -> Optional[str]:
+    """行番号からユーザー名を取得"""
+    users = load_users()
+    if row_index < 0 or row_index >= len(users):
+        return None
+    return users[row_index].get("username")
+
+
+def _get_user_role_by_row(row_index: int) -> Optional[str]:
+    """行番号からロールを取得"""
+    users = load_users()
+    if row_index < 0 or row_index >= len(users):
+        return None
+    return users[row_index].get("role")
+
+
 def add_user(username: str, password: str, role: str, display_name: str, farmer_id: str) -> Tuple[str, List]:
-    """ユーザーを追加"""
+    """ユーザーを追加（DB版）"""
     if not username:
         return "エラー: ユーザー名は必須です", get_users_for_display()
 
@@ -67,59 +86,47 @@ def add_user(username: str, password: str, role: str, display_name: str, farmer_
     if len(password) < 4:
         return "エラー: パスワードは4文字以上必要です", get_users_for_display()
 
-    users = load_users()
+    # auth モジュールの add_user を使用
+    success = auth_add_user(
+        username=username,
+        password=password,
+        role=role,
+        display_name=display_name or username
+    )
 
-    # 重複チェック
-    for user in users:
-        if user.get("username") == username:
-            return f"エラー: ユーザー名 '{username}' は既に存在します", get_users_for_display()
-
-    # 新規ユーザー作成
-    new_user = {
-        "username": username,
-        "password_hash": hash_password(password),
-        "role": role,
-        "display_name": display_name or username,
-        "farmer_id": farmer_id if role == "farmer" else "",
-        "created_at": datetime.now().isoformat()
-    }
-
-    users.append(new_user)
-    save_users(users)
+    if not success:
+        return f"エラー: ユーザー名 '{username}' は既に存在します", get_users_for_display()
 
     return f"ユーザー追加完了: {username} ({ROLE_DISPLAY.get(role, role)})", get_users_for_display()
 
 
 def delete_user(row_index: int, current_username: str) -> Tuple[str, List]:
-    """ユーザーを削除"""
+    """ユーザーを削除（DB版・論理削除）"""
     if row_index is None or row_index < 0:
         return "エラー: 削除するユーザーを選択してください", get_users_for_display()
 
-    users = load_users()
-
-    if row_index >= len(users):
+    target_username = _get_username_by_row(row_index)
+    if not target_username:
         return "エラー: 無効な行番号です", get_users_for_display()
-
-    target_user = users[row_index]
-    target_username = target_user.get("username", "")
 
     # 自分自身は削除不可
     if target_username == current_username:
         return "エラー: 自分自身は削除できません", get_users_for_display()
 
     # 最後の管理者は削除不可
-    admin_count = sum(1 for u in users if u.get("role") == "admin")
-    if target_user.get("role") == "admin" and admin_count <= 1:
+    target_role = _get_user_role_by_row(row_index)
+    if target_role == "admin" and get_admin_count() <= 1:
         return "エラー: 最後の管理者は削除できません", get_users_for_display()
 
-    users.pop(row_index)
-    save_users(users)
+    success = auth_delete_user(target_username)
+    if not success:
+        return f"エラー: ユーザー '{target_username}' の削除に失敗しました", get_users_for_display()
 
     return f"ユーザー削除完了: {target_username}", get_users_for_display()
 
 
 def reset_password(row_index: int, new_password: str) -> Tuple[str, List]:
-    """パスワードをリセット"""
+    """パスワードをリセット（DB版）"""
     if row_index is None or row_index < 0:
         return "エラー: ユーザーを選択してください", get_users_for_display()
 
@@ -129,47 +136,39 @@ def reset_password(row_index: int, new_password: str) -> Tuple[str, List]:
     if len(new_password) < 4:
         return "エラー: パスワードは4文字以上必要です", get_users_for_display()
 
-    users = load_users()
-
-    if row_index >= len(users):
+    target_username = _get_username_by_row(row_index)
+    if not target_username:
         return "エラー: 無効な行番号です", get_users_for_display()
 
-    target_username = users[row_index].get("username", "")
-    users[row_index]["password_hash"] = hash_password(new_password)
-    users[row_index]["updated_at"] = datetime.now().isoformat()
-
-    save_users(users)
+    success = auth_update_password(target_username, new_password)
+    if not success:
+        return f"エラー: パスワードリセットに失敗しました", get_users_for_display()
 
     return f"パスワードリセット完了: {target_username}", get_users_for_display()
 
 
 def update_user_role(row_index: int, new_role: str, current_username: str) -> Tuple[str, List]:
-    """ユーザーロールを変更"""
+    """ユーザーロールを変更（DB版）"""
     if row_index is None or row_index < 0:
         return "エラー: ユーザーを選択してください", get_users_for_display()
 
-    users = load_users()
-
-    if row_index >= len(users):
+    target_username = _get_username_by_row(row_index)
+    if not target_username:
         return "エラー: 無効な行番号です", get_users_for_display()
 
-    target_user = users[row_index]
-    target_username = target_user.get("username", "")
-    old_role = target_user.get("role", "")
+    old_role = _get_user_role_by_row(row_index)
 
     # 自分自身のロールは変更不可（admin降格防止）
     if target_username == current_username:
         return "エラー: 自分自身のロールは変更できません", get_users_for_display()
 
     # 最後の管理者のロール変更は不可
-    admin_count = sum(1 for u in users if u.get("role") == "admin")
-    if old_role == "admin" and new_role != "admin" and admin_count <= 1:
+    if old_role == "admin" and new_role != "admin" and get_admin_count() <= 1:
         return "エラー: 最後の管理者のロールは変更できません", get_users_for_display()
 
-    users[row_index]["role"] = new_role
-    users[row_index]["updated_at"] = datetime.now().isoformat()
-
-    save_users(users)
+    success = auth_update_user_role(target_username, new_role)
+    if not success:
+        return f"エラー: ロール変更に失敗しました", get_users_for_display()
 
     return f"ロール変更完了: {target_username} ({ROLE_DISPLAY.get(old_role)} → {ROLE_DISPLAY.get(new_role)})", get_users_for_display()
 
@@ -185,7 +184,7 @@ def get_system_info() -> str:
     info.append("## システム情報")
     info.append("")
 
-    # ユーザー統計
+    # ユーザー統計（DBから取得）
     users = load_users()
     info.append(f"**ユーザー数**: {len(users)}")
 
@@ -201,13 +200,6 @@ def get_system_info() -> str:
 
     # ファイル情報
     info.append("**データファイル**:")
-
-    if USERS_FILE.exists():
-        size = USERS_FILE.stat().st_size
-        mtime = datetime.fromtimestamp(USERS_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        info.append(f"  - users.json: {size} bytes (更新: {mtime})")
-    else:
-        info.append(f"  - users.json: 未作成")
 
     if DB_FILE.exists():
         size = DB_FILE.stat().st_size / 1024  # KB
@@ -559,16 +551,13 @@ def create_admin_ui(current_username: str = "") -> Dict[str, Any]:
             gr.Markdown("""
             ### データバックアップ
 
-            重要なデータファイルをダウンロードできます。
+            データベースファイルをダウンロードできます。
+            ユーザー情報、ほ場データ、輪作計画など全てのデータが含まれます。
             """)
-
-            def get_users_file():
-                return str(USERS_FILE) if USERS_FILE.exists() else None
 
             def get_db_file():
                 return str(DB_FILE) if DB_FILE.exists() else None
 
-            gr.DownloadButton("📥 users.json ダウンロード", value=get_users_file())
             gr.DownloadButton("📥 rotation_planner.db ダウンロード", value=get_db_file())
 
             gr.Markdown("""

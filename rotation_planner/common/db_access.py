@@ -1401,6 +1401,239 @@ class MigrationUtils:
 
 
 # =============================================================================
+# PesticideRegistryRepository - 農薬登録情報
+# =============================================================================
+
+class PesticideRegistryRepository:
+    """農薬登録情報（FAMIC登録基本部）のリポジトリ"""
+
+    @staticmethod
+    def get_by_id(pesticide_id: int) -> Optional[Dict[str, Any]]:
+        """IDで農薬を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_registry WHERE id = ?",
+                (pesticide_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def get_by_name(name: str) -> Optional[Dict[str, Any]]:
+        """農薬名で取得（完全一致）"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_registry WHERE name = ?",
+                (name,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def search(keyword: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """農薬名で部分一致検索"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_registry WHERE name LIKE ? ORDER BY name LIMIT ?",
+                (f"%{keyword}%", limit)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def get_by_registration_number(reg_no: str) -> Optional[Dict[str, Any]]:
+        """登録番号で取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_registry WHERE registration_number = ?",
+                (reg_no,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def get_all(limit: int = 1000) -> List[Dict[str, Any]]:
+        """全件取得（制限付き）"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_registry ORDER BY name LIMIT ?",
+                (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# PesticideUsageRepository - 農薬適用情報
+# =============================================================================
+
+class PesticideUsageRepository:
+    """農薬適用情報（FAMIC登録適用部）のリポジトリ"""
+
+    @staticmethod
+    def get_by_pesticide_id(pesticide_id: int) -> List[Dict[str, Any]]:
+        """農薬IDで適用情報を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_usage WHERE pesticide_id = ? ORDER BY crop",
+                (pesticide_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def get_by_crop(crop: str) -> List[Dict[str, Any]]:
+        """作物名で適用情報を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT u.*, r.name as pesticide_name, r.category, r.formulation
+                FROM pesticide_usage u
+                JOIN pesticide_registry r ON u.pesticide_id = r.id
+                WHERE u.crop = ?
+                ORDER BY r.name
+                """,
+                (crop,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def search_by_crop(keyword: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """作物名で部分一致検索"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT u.*, r.name as pesticide_name, r.category
+                FROM pesticide_usage u
+                JOIN pesticide_registry r ON u.pesticide_id = r.id
+                WHERE u.crop LIKE ?
+                ORDER BY u.crop, r.name
+                LIMIT ?
+                """,
+                (f"%{keyword}%", limit)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def get_for_pesticide_and_crop(pesticide_id: int, crop: str) -> List[Dict[str, Any]]:
+        """特定農薬×作物の適用情報を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM pesticide_usage WHERE pesticide_id = ? AND crop = ?",
+                (pesticide_id, crop)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# PesticideRecordRepository - 防除記録
+# =============================================================================
+
+class PesticideRecordRepository:
+    """防除記録のリポジトリ"""
+
+    @staticmethod
+    def get_records(user_id: int, field_id: int = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """ユーザーの防除記録を取得"""
+        with get_db() as conn:
+            if field_id:
+                cursor = conn.execute(
+                    """
+                    SELECT r.*, f.field_code, f.name as field_name
+                    FROM pesticide_records r
+                    JOIN fields f ON r.field_id = f.id
+                    WHERE r.user_id = ? AND r.field_id = ?
+                    ORDER BY r.spray_date DESC
+                    LIMIT ?
+                    """,
+                    (user_id, field_id, limit)
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT r.*, f.field_code, f.name as field_name
+                    FROM pesticide_records r
+                    JOIN fields f ON r.field_id = f.id
+                    WHERE r.user_id = ?
+                    ORDER BY r.spray_date DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit)
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def create_record(user_id: int, data: Dict[str, Any]) -> int:
+        """防除記録を作成"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO pesticide_records
+                (user_id, field_id, spray_date, pesticide_name, pesticide_id,
+                 dilution_rate, spray_amount, spray_unit, photo_path, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    data.get("field_id"),
+                    data.get("spray_date"),
+                    data.get("pesticide_name"),
+                    data.get("pesticide_id"),
+                    data.get("dilution_rate"),
+                    data.get("spray_amount"),
+                    data.get("spray_unit"),
+                    data.get("photo_path"),
+                    data.get("notes"),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    @staticmethod
+    def update_record(record_id: int, data: Dict[str, Any]) -> bool:
+        """防除記録を更新"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pesticide_records SET
+                    field_id = ?,
+                    spray_date = ?,
+                    pesticide_name = ?,
+                    pesticide_id = ?,
+                    dilution_rate = ?,
+                    spray_amount = ?,
+                    spray_unit = ?,
+                    photo_path = ?,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    data.get("field_id"),
+                    data.get("spray_date"),
+                    data.get("pesticide_name"),
+                    data.get("pesticide_id"),
+                    data.get("dilution_rate"),
+                    data.get("spray_amount"),
+                    data.get("spray_unit"),
+                    data.get("photo_path"),
+                    data.get("notes"),
+                    record_id,
+                )
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete_record(record_id: int) -> bool:
+        """防除記録を削除"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM pesticide_records WHERE id = ?",
+                (record_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+# =============================================================================
 # 動作確認用
 # =============================================================================
 

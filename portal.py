@@ -19,6 +19,7 @@ from rotation_planner.common import (
 # UIモジュール
 from rotation_planner.app import create_rotation_planner_ui
 from rotation_planner.pesticide import create_pesticide_order_ui
+from rotation_planner.pesticide_record import create_pesticide_record_ui, load_initial_fields
 from rotation_planner.field import create_field_register_ui, create_crop_settings_ui
 from rotation_planner.field.crud import get_fields_with_history
 from rotation_planner.data_management import create_data_management_ui
@@ -556,6 +557,12 @@ def create_app():
                 create_pesticide_order_ui(user_state)
 
             # =================================================================
+            # 🧪 防除記録タブ（farmer, ja_staff, admin）
+            # =================================================================
+            with gr.TabItem("🧪 防除記録", id="pesticide_record") as pesticide_record_tab:
+                pesticide_record_components = create_pesticide_record_ui(user_state)
+
+            # =================================================================
             # 📥 データ管理タブ（farmer, ja_staff, admin）
             # =================================================================
             with gr.TabItem("📥 データ管理", id="data_management") as data_management_tab:
@@ -670,6 +677,15 @@ def create_app():
             from rotation_planner.crop_history.ui import load_initial_history
             return load_initial_history(user_state_dict)
 
+        # 防除記録タブの初期化
+        def init_pesticide_record_tab(user_state_dict):
+            """防除記録タブの初期化（ほ場選択肢を設定）"""
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                empty = gr.Dropdown(choices=[], value=None)
+                return empty, empty, empty
+
+            return load_initial_fields(user_state_dict)
+
         app.load(
             fn=on_app_load,
             outputs=[user_state, user_header, stats_card, farmers_tab, pesticide_master_tab, admin_tab]
@@ -701,6 +717,14 @@ def create_app():
                 crop_history_components["field_selector"],
                 crop_history_components["history_table"],
                 crop_history_components["warning_area"]
+            ]
+        ).then(
+            fn=init_pesticide_record_tab,
+            inputs=[user_state],
+            outputs=[
+                pesticide_record_components["field_dropdown"],
+                pesticide_record_components["history_field_filter"],
+                pesticide_record_components["edit_field_dropdown"],
             ]
         )
 
@@ -738,6 +762,14 @@ def create_app():
                     crop_history_components["field_selector"],
                     crop_history_components["history_table"],
                     crop_history_components["warning_area"]
+                ]
+            ).then(
+                fn=init_pesticide_record_tab,
+                inputs=[user_state],
+                outputs=[
+                    pesticide_record_components["field_dropdown"],
+                    pesticide_record_components["history_field_filter"],
+                    pesticide_record_components["edit_field_dropdown"],
                 ]
             )
 

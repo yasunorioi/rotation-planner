@@ -72,6 +72,18 @@ from .csv_io import (
     merge_with_calculated,
 )
 
+# 年度ユーティリティ（common経由でも利用可能だが利便性のため）
+try:
+    from rotation_planner.common.year_utils import (
+        get_default_target_year,
+        generate_year_choices,
+        get_current_fiscal_year,
+    )
+except ImportError:
+    get_default_target_year = None
+    generate_year_choices = None
+    get_current_fiscal_year = None
+
 __all__ = [
     # calculator
     "calculate_pesticide_requirements",
@@ -107,6 +119,10 @@ __all__ = [
     "export_order_csv",
     "import_order_csv",
     "merge_with_calculated",
+    # year_utils
+    "get_default_target_year",
+    "generate_year_choices",
+    "get_current_fiscal_year",
 ]
 
 __version__ = "1.0.0"

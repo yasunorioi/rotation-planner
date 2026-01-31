@@ -118,6 +118,16 @@ from rotation_planner.common.ui_utils import (
     format_info,
 )
 
+# 年度ユーティリティ
+from rotation_planner.common.year_utils import (
+    get_current_fiscal_year,
+    get_fiscal_year_for_date,
+    reiwa_to_western,
+    western_to_reiwa,
+    get_default_target_year,
+    generate_year_choices,
+)
+
 __all__ = [
     # ロール定数
     "ROLE_ADMIN",
@@ -189,4 +199,11 @@ __all__ = [
     "format_error",
     "format_warning",
     "format_info",
+    # 年度ユーティリティ
+    "get_current_fiscal_year",
+    "get_fiscal_year_for_date",
+    "reiwa_to_western",
+    "western_to_reiwa",
+    "get_default_target_year",
+    "generate_year_choices",
 ]

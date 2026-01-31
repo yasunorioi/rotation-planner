@@ -30,6 +30,16 @@ except ImportError:
     UserRepository = None
     PesticideOrderRepository = None
 
+# 年度ユーティリティ
+try:
+    from rotation_planner.common.year_utils import (
+        get_default_target_year,
+        generate_year_choices,
+    )
+except ImportError:
+    get_default_target_year = None
+    generate_year_choices = None
+
 
 # =============================================================================
 # JA職員向け集計機能
@@ -133,7 +143,12 @@ def generate_pdf_from_results(summary_df, detail_df, order_name, target_year):
 
 
 def get_available_years_from_db(plan_id):
-    """DBの輪作計画から選択可能な年を取得"""
+    """DBの輪作計画から選択可能な年を取得
+
+    デフォルト選択ロジック:
+    - 3月まで: 当年度（例: 2026年3月 → R7）
+    - 4月から: 翌年度（例: 2026年4月 → R8）
+    """
     if plan_id is None:
         return gr.update(choices=[], value=None)
 
@@ -144,7 +159,19 @@ def get_available_years_from_db(plan_id):
 
         # 📍を除去して年リストを作成
         years = [c.replace('📍', '') for c in year_cols]
-        return gr.update(choices=years, value=years[-1] if years else None)
+
+        # デフォルト年度を決定
+        default_year = None
+        if get_default_target_year:
+            target_year = get_default_target_year()  # 例: "R8"
+            if target_year in years:
+                default_year = target_year
+
+        # デフォルトがなければ最新年を選択
+        if default_year is None and years:
+            default_year = years[-1]
+
+        return gr.update(choices=years, value=default_year)
     except:
         return gr.update(choices=[], value=None)
 

@@ -99,12 +99,27 @@ class FieldResponse(BaseModel):
     id: int
     user_id: int
     field_code: str
-    field_name: Optional[str]
-    district: Optional[str]
+    field_name: Optional[str] = None
+    district: Optional[str] = None
     area_ha: float
-    beet_forbidden: bool
-    created_at: Optional[str]
-    updated_at: Optional[str]
+    beet_forbidden: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @classmethod
+    def from_db(cls, data: dict, user_id: int = None) -> "FieldResponse":
+        """DBレコードからレスポンスを生成"""
+        return cls(
+            id=data["id"],
+            user_id=data.get("user_id") or user_id or 0,
+            field_code=data["field_code"],
+            field_name=data.get("name") or data.get("field_name"),
+            district=data.get("district"),
+            area_ha=data["area_ha"],
+            beet_forbidden=bool(data.get("beet_forbidden", 0)),
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+        )
 
 
 class CropHistoryCreate(BaseModel):
@@ -240,24 +255,31 @@ def get_me(current_user: Dict = Depends(get_current_user)):
 def list_fields(current_user: Dict = Depends(get_current_user)):
     """ほ場一覧取得"""
     fields = FieldRepository.get_fields(current_user["id"])
-    return [FieldResponse(**f) for f in fields]
+    return [FieldResponse.from_db(f, user_id=current_user["id"]) for f in fields]
 
 
 @app.post("/api/fields", response_model=FieldResponse, status_code=201)
 def create_field(field: FieldCreate, current_user: Dict = Depends(get_current_user)):
     """ほ場作成"""
-    field_id = FieldRepository.create_field(
-        user_id=current_user["id"],
-        field_code=field.field_code,
-        field_name=field.field_name,
-        district=field.district,
-        area_ha=field.area_ha,
-        beet_forbidden=field.beet_forbidden
-    )
-    created = FieldRepository.get_field(field_id)
-    if not created:
-        raise HTTPException(status_code=500, detail="Failed to create field")
-    return FieldResponse(**created)
+    try:
+        field_id = FieldRepository.create_field(
+            user_id=current_user["id"],
+            data={
+                "field_code": field.field_code,
+                "name": field.field_name,  # DB column is 'name'
+                "district": field.district,
+                "area_ha": field.area_ha,
+                "beet_forbidden": field.beet_forbidden
+            }
+        )
+        created = FieldRepository.get_field(field_id)
+        if not created:
+            raise HTTPException(status_code=500, detail="Failed to create field")
+        return FieldResponse.from_db(created)
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=400, detail=f"ほ場コード '{field.field_code}' は既に使用されています")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/fields/{field_id}", response_model=FieldResponse)
@@ -268,7 +290,7 @@ def get_field(field_id: int, current_user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Field not found")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
-    return FieldResponse(**field)
+    return FieldResponse.from_db(field)
 
 
 @app.put("/api/fields/{field_id}", response_model=FieldResponse)
@@ -282,10 +304,10 @@ def update_field(field_id: int, field: FieldUpdate, current_user: Dict = Depends
 
     update_data = field.model_dump(exclude_unset=True)
     if update_data:
-        FieldRepository.update_field(field_id, **update_data)
+        FieldRepository.update_field(field_id, update_data)
 
     updated = FieldRepository.get_field(field_id)
-    return FieldResponse(**updated)
+    return FieldResponse.from_db(updated)
 
 
 @app.delete("/api/fields/{field_id}", status_code=204)

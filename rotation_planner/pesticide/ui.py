@@ -45,16 +45,103 @@ except ImportError:
 # JA職員向け集計機能
 # =============================================================================
 
-def get_all_farmers_orders() -> pd.DataFrame:
-    """全農家の発注状況を取得（JA職員用）"""
-    # 将来の拡張用
-    return pd.DataFrame(columns=['農家名', '発注日', '農薬名', '数量', '単位', '状態'])
+# JAStaffRepository インポート
+try:
+    from rotation_planner.common.db_access import JAStaffRepository
+except ImportError:
+    JAStaffRepository = None
 
 
-def get_aggregate_pesticide_orders(org_id: int = None) -> pd.DataFrame:
-    """組織全体の農薬発注集計（JA職員用）"""
-    # 将来の拡張用
-    return pd.DataFrame(columns=['農薬名', '総必要量', '単位', '発注農家数'])
+def get_all_farmers_orders(org_id: int, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    全農家の発注状況を取得（JA職員用）
+
+    Args:
+        org_id: 組織ID
+        start_date: 開始日（任意）
+        end_date: 終了日（任意）
+
+    Returns:
+        発注状況のDataFrame
+    """
+    if JAStaffRepository is None:
+        return pd.DataFrame(columns=['農家名', '発注日', '農薬名', '数量', '単位', '状態'])
+
+    try:
+        orders = JAStaffRepository.get_orders_by_org(org_id, start_date, end_date)
+        if not orders:
+            return pd.DataFrame(columns=['農家名', '発注日', '農薬名', '数量', '単位', '状態'])
+
+        rows = []
+        for order in orders:
+            farmer_name = order.get('farmer_name', order.get('username', '不明'))
+            created_at = str(order.get('created_at', ''))[:10]
+            order_data = order.get('order_data', {})
+            status = order.get('status', 'draft')
+
+            # サマリから農薬情報を展開
+            summary = order_data.get('summary', [])
+            if summary:
+                for item in summary:
+                    rows.append({
+                        '農家名': farmer_name,
+                        '発注日': created_at,
+                        '農薬名': item.get('pesticide_name') or item.get('農薬名', ''),
+                        '数量': item.get('amount') or item.get('必要量', 0),
+                        '単位': item.get('unit') or item.get('単位', ''),
+                        '状態': status,
+                    })
+            else:
+                # サマリがない場合も1行表示
+                rows.append({
+                    '農家名': farmer_name,
+                    '発注日': created_at,
+                    '農薬名': order.get('order_name', ''),
+                    '数量': '-',
+                    '単位': '-',
+                    '状態': status,
+                })
+
+        return pd.DataFrame(rows)
+
+    except Exception as e:
+        print(f"get_all_farmers_orders error: {e}")
+        return pd.DataFrame(columns=['農家名', '発注日', '農薬名', '数量', '単位', '状態'])
+
+
+def get_aggregate_pesticide_orders(org_id: int, target_year: str = None) -> pd.DataFrame:
+    """
+    組織全体の農薬発注集計（JA職員用）
+
+    Args:
+        org_id: 組織ID
+        target_year: 対象年（任意）
+
+    Returns:
+        農薬別集計のDataFrame
+    """
+    if JAStaffRepository is None:
+        return pd.DataFrame(columns=['農薬名', '総必要量', '単位', '発注農家数'])
+
+    try:
+        aggregates = JAStaffRepository.get_aggregate_orders_by_org(org_id, target_year)
+        if not aggregates:
+            return pd.DataFrame(columns=['農薬名', '総必要量', '単位', '発注農家数'])
+
+        rows = []
+        for item in aggregates:
+            rows.append({
+                '農薬名': item.get('pesticide_name', ''),
+                '総必要量': item.get('total_quantity', 0),
+                '単位': item.get('unit', ''),
+                '発注農家数': item.get('farmer_count', 0),
+            })
+
+        return pd.DataFrame(rows)
+
+    except Exception as e:
+        print(f"get_aggregate_pesticide_orders error: {e}")
+        return pd.DataFrame(columns=['農薬名', '総必要量', '単位', '発注農家数'])
 
 
 # =============================================================================

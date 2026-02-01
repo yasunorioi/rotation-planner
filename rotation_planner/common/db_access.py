@@ -643,6 +643,138 @@ class JAStaffRepository:
 
             return stats
 
+    @staticmethod
+    def get_orders_by_org(org_id: int, start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
+        """
+        組織内の全農家の発注データを取得
+
+        Args:
+            org_id: 組織ID
+            start_date: 開始日（YYYY-MM-DD形式、任意）
+            end_date: 終了日（YYYY-MM-DD形式、任意）
+
+        Returns:
+            発注データのリスト
+        """
+        with get_db() as conn:
+            query = """
+                SELECT
+                    po.id,
+                    po.name as order_name,
+                    po.target_year,
+                    po.status,
+                    po.created_at,
+                    po.order_data_json,
+                    u.id as user_id,
+                    u.username,
+                    u.display_name as farmer_name
+                FROM pesticide_orders po
+                JOIN users u ON po.user_id = u.id
+                WHERE u.org_id = ?
+            """
+            params = [org_id]
+
+            if start_date:
+                query += " AND date(po.created_at) >= ?"
+                params.append(start_date)
+            if end_date:
+                query += " AND date(po.created_at) <= ?"
+                params.append(end_date)
+
+            query += " ORDER BY po.created_at DESC"
+
+            cursor = conn.execute(query, params)
+            results = rows_to_list(cursor.fetchall())
+
+            # order_data_json をパース
+            for r in results:
+                if r.get('order_data_json'):
+                    try:
+                        r['order_data'] = json.loads(r['order_data_json'])
+                    except:
+                        r['order_data'] = {}
+                else:
+                    r['order_data'] = {}
+
+            return results
+
+    @staticmethod
+    def get_aggregate_orders_by_org(org_id: int, target_year: str = None) -> List[Dict[str, Any]]:
+        """
+        組織全体の農薬別発注集計
+
+        Args:
+            org_id: 組織ID
+            target_year: 対象年（任意）
+
+        Returns:
+            農薬別集計リスト
+            [{pesticide_name, total_quantity, unit, farmer_count}, ...]
+        """
+        with get_db() as conn:
+            query = """
+                SELECT po.order_data_json, u.id as user_id
+                FROM pesticide_orders po
+                JOIN users u ON po.user_id = u.id
+                WHERE u.org_id = ?
+            """
+            params = [org_id]
+
+            if target_year:
+                query += " AND po.target_year = ?"
+                params.append(target_year)
+
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+
+            # 農薬別に集計
+            pesticide_totals = {}  # {pesticide_name: {quantity, unit, farmers: set}}
+
+            for row in rows:
+                user_id = row['user_id']
+                order_data_json = row['order_data_json']
+                if not order_data_json:
+                    continue
+
+                try:
+                    order_data = json.loads(order_data_json)
+                except:
+                    continue
+
+                summary = order_data.get('summary', [])
+                for item in summary:
+                    name = item.get('pesticide_name') or item.get('農薬名')
+                    if not name:
+                        continue
+
+                    amount = item.get('amount') or item.get('必要量') or 0
+                    unit = item.get('unit') or item.get('単位') or ''
+
+                    if name not in pesticide_totals:
+                        pesticide_totals[name] = {
+                            'quantity': 0,
+                            'unit': unit,
+                            'farmers': set()
+                        }
+
+                    try:
+                        pesticide_totals[name]['quantity'] += float(amount)
+                    except (ValueError, TypeError):
+                        pass
+                    pesticide_totals[name]['farmers'].add(user_id)
+
+            # 結果をリスト化
+            results = []
+            for name, data in sorted(pesticide_totals.items()):
+                results.append({
+                    'pesticide_name': name,
+                    'total_quantity': round(data['quantity'], 2),
+                    'unit': data['unit'],
+                    'farmer_count': len(data['farmers'])
+                })
+
+            return results
+
 
 # =============================================================================
 # ユーザーリポジトリ

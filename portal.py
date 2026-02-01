@@ -19,6 +19,7 @@ from rotation_planner.common import (
 # UIモジュール
 from rotation_planner.app import create_rotation_planner_ui
 from rotation_planner.pesticide import create_pesticide_order_ui
+from rotation_planner.pesticide.ja_staff_ui import create_ja_staff_summary_ui
 from rotation_planner.pesticide_record import create_pesticide_record_ui, load_initial_fields
 from rotation_planner.field import create_field_register_ui, create_crop_settings_ui
 from rotation_planner.field.crud import get_fields_with_history
@@ -569,32 +570,10 @@ def create_app():
                 data_management_ui = create_data_management_ui(user_state)
 
             # =================================================================
-            # 📊 農家一覧タブ（ja_staff, admin のみ）
+            # 📊 JA職員向け集計タブ（ja_staff, admin のみ）
             # =================================================================
-            with gr.TabItem("📊 農家一覧", id="farmers", visible=False) as farmers_tab:
-                gr.Markdown("## 👥 組織内農家一覧")
-                gr.Markdown("*JA職員・管理者のみ表示*")
-
-                farmers_table = gr.Dataframe(
-                    headers=["ID", "ユーザー名", "表示名", "ほ場数", "総面積(ha)"],
-                    label="農家一覧"
-                )
-
-                def load_farmers():
-                    try:
-                        farmers = JAStaffRepository.get_all_farmers(org_id=1)
-                        return [[
-                            f.get('id'),
-                            f.get('username'),
-                            f.get('display_name'),
-                            f.get('field_count', 0),
-                            f"{f.get('total_area_ha', 0):.2f}"
-                        ] for f in farmers]
-                    except:
-                        return []
-
-                refresh_farmers_btn = gr.Button("🔄 更新")
-                refresh_farmers_btn.click(fn=load_farmers, outputs=[farmers_table])
+            with gr.TabItem("📊 JA集計", id="farmers", visible=False) as farmers_tab:
+                ja_staff_ui = create_ja_staff_summary_ui(user_state)
 
             # =================================================================
             # 💊 防除マスタ管理タブ（ja_staff, admin のみ）

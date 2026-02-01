@@ -136,6 +136,23 @@ CREATE INDEX IF NOT EXISTS idx_pesticide_masters_org ON pesticide_masters(org_id
 CREATE INDEX IF NOT EXISTS idx_pesticide_masters_crop ON pesticide_masters(crop);
 
 -- ═══════════════════════════════════════════════════════════════
+-- 8. ユーザー輪作制約設定
+--    ユーザーごとの制約テーブル・禁止遷移・優先遷移・主作物を保存
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS user_constraints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    constraints_json TEXT NOT NULL,
+    forbidden_transitions TEXT,
+    preferred_transitions TEXT,
+    main_crops TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_constraints_user ON user_constraints(user_id);
+
+-- ═══════════════════════════════════════════════════════════════
 -- 9. 発注テンプレート（ユーザー別カスタムテンプレート）
 --    type: default=デフォルト, history=過去履歴ベース, custom=カスタム
 -- ═══════════════════════════════════════════════════════════════

@@ -1533,6 +1533,84 @@ class MigrationUtils:
 
 
 # =============================================================================
+# UserConstraintsRepository - ユーザー輪作制約設定
+# =============================================================================
+
+class UserConstraintsRepository:
+    """ユーザーごとの輪作制約設定リポジトリ"""
+
+    @staticmethod
+    def get_constraints(user_id: int) -> Optional[Dict[str, Any]]:
+        """
+        ユーザーの制約設定を取得
+
+        Returns:
+            {
+                'constraints': [...],  # 制約テーブル（リスト形式）
+                'forbidden_transitions': str,
+                'preferred_transitions': str,
+                'main_crops': str
+            }
+        """
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM user_constraints WHERE user_id = ?",
+                (user_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            # JSONをパース
+            if data.get('constraints_json'):
+                data['constraints'] = json.loads(data['constraints_json'])
+            else:
+                data['constraints'] = []
+            return data
+
+    @staticmethod
+    def save_constraints(user_id: int, constraints: list, forbidden_transitions: str = "",
+                         preferred_transitions: str = "", main_crops: str = "") -> bool:
+        """
+        ユーザーの制約設定を保存（INSERT OR REPLACE）
+
+        Args:
+            user_id: ユーザーID
+            constraints: 制約テーブル（リスト形式）
+            forbidden_transitions: 禁止遷移（テキスト形式）
+            preferred_transitions: 優先遷移（テキスト形式）
+            main_crops: 主作物（テキスト形式）
+
+        Returns:
+            成功時True
+        """
+        constraints_json = json.dumps(constraints, ensure_ascii=False)
+        with get_db() as conn:
+            conn.execute("""
+                INSERT INTO user_constraints (user_id, constraints_json, forbidden_transitions,
+                                              preferred_transitions, main_crops, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    constraints_json = excluded.constraints_json,
+                    forbidden_transitions = excluded.forbidden_transitions,
+                    preferred_transitions = excluded.preferred_transitions,
+                    main_crops = excluded.main_crops,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (user_id, constraints_json, forbidden_transitions, preferred_transitions, main_crops))
+        return True
+
+    @staticmethod
+    def delete_constraints(user_id: int) -> bool:
+        """ユーザーの制約設定を削除"""
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM user_constraints WHERE user_id = ?",
+                (user_id,)
+            )
+        return True
+
+
+# =============================================================================
 # PesticideRegistryRepository - 農薬登録情報
 # =============================================================================
 

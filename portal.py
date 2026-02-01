@@ -374,6 +374,10 @@ def create_app():
                     with gr.Column(scale=1):
                         gr.Markdown("## ⚙️ 制約設定")
 
+                        with gr.Row():
+                            save_constraints_btn = gr.Button("💾 制約を保存", size="sm")
+                            constraints_save_msg = gr.Textbox(label="", interactive=False, show_label=False, max_lines=1, scale=2)
+
                         constraints_table = gr.Dataframe(
                             value=build_constraints_table(DEFAULT_CROPS),
                             label="制約テーブル",
@@ -386,6 +390,29 @@ def create_app():
                         forbidden_text = gr.Textbox(value="", label="追加禁止遷移", placeholder="from->to, from->to, ...")
                         preferred_text = gr.Textbox(value=DEFAULT_PREFERRED_TRANSITIONS, label="優先遷移")
                         main_crops_text = gr.Textbox(value=DEFAULT_MAIN_CROPS, label="主作物")
+
+                # 制約保存関数
+                def save_user_constraints(constraints_df, forbidden, preferred, main_crops, user_state_dict):
+                    """制約設定をDBに保存"""
+                    from rotation_planner.common import UserConstraintsRepository
+                    if not user_state_dict or not user_state_dict.get("user_id"):
+                        return "エラー: ログインが必要です"
+                    user_id = user_state_dict.get("user_id")
+                    try:
+                        # DataFrameをリストに変換
+                        constraints_list = constraints_df.to_dict('records') if constraints_df is not None else []
+                        UserConstraintsRepository.save_constraints(
+                            user_id, constraints_list, forbidden or "", preferred or "", main_crops or ""
+                        )
+                        return "✅ 制約設定を保存しました"
+                    except Exception as e:
+                        return f"エラー: {str(e)}"
+
+                save_constraints_btn.click(
+                    fn=save_user_constraints,
+                    inputs=[constraints_table, forbidden_text, preferred_text, main_crops_text, user_state],
+                    outputs=[constraints_save_msg]
+                )
 
                 # 制約テーブル更新イベント
                 crop_text.change(fn=update_constraints_table, inputs=[crop_text, constraints_table], outputs=[constraints_table])
@@ -609,27 +636,46 @@ def create_app():
 
             return df, crop_dropdown
 
-        # 輪作計画タブの初期化（ほ場自動読み込み）
+        # 輪作計画タブの初期化（ほ場自動読み込み + 制約設定）
         def init_rotation_tab(user_state_dict):
-            """輪作計画タブの初期化 - 登録済みほ場を自動読み込み"""
+            """輪作計画タブの初期化 - 登録済みほ場と制約を自動読み込み"""
+            from rotation_planner.common import UserConstraintsRepository
+            import pandas as pd
+
+            empty_df = build_constraints_table(DEFAULT_CROPS)
+
             if not user_state_dict or not user_state_dict.get("user_id"):
-                return None, None, "ログインしてください", ""
+                return None, None, "ログインしてください", "", empty_df, "", DEFAULT_PREFERRED_TRANSITIONS, DEFAULT_MAIN_CROPS
 
             user_id = user_state_dict.get("user_id")
             fields, past_years, error = get_fields_with_history(user_id)
 
             if error:
-                return None, None, error, ""
+                return None, None, error, "", empty_df, "", DEFAULT_PREFERRED_TRANSITIONS, DEFAULT_MAIN_CROPS
 
             if not fields:
-                return None, None, "ほ場が登録されていません", ""
+                return None, None, "ほ場が登録されていません", "", empty_df, "", DEFAULT_PREFERRED_TRANSITIONS, DEFAULT_MAIN_CROPS
 
             # ユーザーの作物リストを取得
             crops = get_default_crops(user_id)
             crops_text = "\n".join(crops) if crops else ""
 
+            # ユーザーの制約設定を取得
+            saved_constraints = UserConstraintsRepository.get_constraints(user_id)
+            if saved_constraints and saved_constraints.get('constraints'):
+                constraints_df = pd.DataFrame(saved_constraints['constraints'])
+                forbidden = saved_constraints.get('forbidden_transitions', "") or ""
+                preferred = saved_constraints.get('preferred_transitions', "") or DEFAULT_PREFERRED_TRANSITIONS
+                main_crops = saved_constraints.get('main_crops', "") or DEFAULT_MAIN_CROPS
+            else:
+                # 保存済み制約がなければ作物リストから生成
+                constraints_df = build_constraints_table(crops) if crops else empty_df
+                forbidden = ""
+                preferred = DEFAULT_PREFERRED_TRANSITIONS
+                main_crops = DEFAULT_MAIN_CROPS
+
             message = f"✅ {len(fields)}件のほ場（{len(past_years)}年分の履歴）"
-            return fields, past_years, message, crops_text
+            return fields, past_years, message, crops_text, constraints_df, forbidden, preferred, main_crops
 
         app.load(
             fn=on_app_load,
@@ -669,7 +715,8 @@ def create_app():
         ).then(
             fn=init_rotation_tab,
             inputs=[user_state],
-            outputs=[fields_state, past_years_state, fields_status, crop_text]
+            outputs=[fields_state, past_years_state, fields_status, crop_text,
+                     constraints_table, forbidden_text, preferred_text, main_crops_text]
         ).then(
             fn=init_pesticide_record_tab,
             inputs=[user_state],
@@ -721,7 +768,8 @@ def create_app():
             ).then(
                 fn=init_rotation_tab,
                 inputs=[user_state],
-                outputs=[fields_state, past_years_state, fields_status, crop_text]
+                outputs=[fields_state, past_years_state, fields_status, crop_text,
+                         constraints_table, forbidden_text, preferred_text, main_crops_text]
             ).then(
                 fn=init_pesticide_record_tab,
                 inputs=[user_state],

@@ -5,6 +5,7 @@
 
 import gradio as gr
 import os
+from datetime import datetime
 from typing import Optional, Dict, Any
 
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
@@ -21,10 +22,11 @@ from rotation_planner.app import create_rotation_planner_ui
 from rotation_planner.pesticide import create_pesticide_order_ui
 from rotation_planner.pesticide.ja_staff_ui import create_ja_staff_summary_ui
 from rotation_planner.pesticide_record import create_pesticide_record_ui, load_initial_fields
-from rotation_planner.field import create_field_register_ui, create_crop_settings_ui
+from rotation_planner.field import create_field_register_ui, create_crop_settings_ui, create_field_list_ui
 from rotation_planner.field.crud import get_fields_with_history
 from rotation_planner.data_management import create_data_management_ui
-from rotation_planner.crop_history import create_crop_history_ui
+# 作付履歴はほ場一覧に統合されたため削除
+# from rotation_planner.crop_history import create_crop_history_ui
 
 # =============================================================================
 # 定数
@@ -292,10 +294,10 @@ def create_app():
                 field_components = create_field_register_ui(user_state)
 
             # =================================================================
-            # 📜 作付履歴タブ（farmer, ja_staff, admin）
+            # 🗺️ ほ場一覧タブ（farmer, ja_staff, admin）
             # =================================================================
-            with gr.TabItem("📜 作付履歴", id="crop_history") as crop_history_tab:
-                crop_history_components = create_crop_history_ui(user_state)
+            with gr.TabItem("🗺️ ほ場一覧", id="field_list") as field_list_tab:
+                field_list_components = create_field_list_ui(user_state)
 
             # =================================================================
             # 🌾 輪作計画タブ（farmer, ja_staff, admin）
@@ -305,12 +307,7 @@ def create_app():
                 gr.Markdown("""
                 過去の作付データから、将来の輪作計画を自動生成します。
 
-                ## 使い方
-                1. **「登録済みほ場を読み込む」** ボタンをクリック
-                2. 作物・制約を設定
-                3. 「計画を生成」ボタンをクリック
-
-                ※ ほ場データは「📥 データ管理」タブでインポートできます
+                登録済みほ場と作付履歴は自動で読み込まれます。
                 """)
 
                 # 輪作計画UIを埋め込み
@@ -332,38 +329,23 @@ def create_app():
 
                 with gr.Row():
                     with gr.Column(scale=1):
-                        gr.Markdown("## 📂 入力")
+                        gr.Markdown("## ⚙️ 設定")
 
-                        # 登録済みほ場を使うボタン
-                        with gr.Row():
-                            load_registered_fields_btn = gr.Button(
-                                "📋 登録済みほ場を読み込む",
-                                variant="primary"
-                            )
-                            fields_status = gr.Textbox(
-                                label="",
-                                interactive=False,
-                                show_label=False,
-                                max_lines=1
-                            )
+                        # ほ場読み込み状態表示
+                        fields_status = gr.Textbox(
+                            label="ほ場データ",
+                            interactive=False,
+                            max_lines=1
+                        )
 
-                        # CSVアップロードは廃止（データ管理タブでインポート）
-                        csv_file = gr.State(value=None)
-
-                        # DB直接読み込み用 State（登録済みほ場ボタン用）
+                        # DB直接読み込み用 State
                         fields_state = gr.State(value=None)
                         past_years_state = gr.State(value=None)
 
-                        with gr.Row():
-                            area_unit = gr.Radio(
-                                choices=["a (アール)", "ha (ヘクタール)"],
-                                value="a (アール)",
-                                label="面積の単位"
-                            )
-                            n_years = gr.Slider(
-                                minimum=1, maximum=10, value=5, step=1,
-                                label="将来年数"
-                            )
+                        n_years = gr.Slider(
+                            minimum=1, maximum=10, value=5, step=1,
+                            label="将来年数"
+                        )
 
                         unknown_mode = gr.Radio(
                             choices=["制約をかけない（推奨）", "安全側（不明年を考慮）"],
@@ -391,9 +373,6 @@ def create_app():
 
                     with gr.Column(scale=1):
                         gr.Markdown("## ⚙️ 制約設定")
-
-                        # 制約CSVアップロードは廃止（テーブルを直接編集）
-                        constraints_file = gr.State(value=None)
 
                         constraints_table = gr.Dataframe(
                             value=build_constraints_table(DEFAULT_CROPS),
@@ -425,18 +404,16 @@ def create_app():
                 with gr.Row():
                     csv_download = gr.File(label="📥 計画CSVダウンロード")
                     with gr.Column():
-                        plan_name_input = gr.Textbox(label="計画名", placeholder="例: 2026年度計画")
-                        save_to_db_btn = gr.Button("💾 DBに保存", variant="secondary")
-                        save_result = gr.Textbox(label="保存結果", interactive=False, max_lines=1)
+                        save_to_history_btn = gr.Button("💾 作付履歴に保存", variant="primary")
+                        save_result = gr.Textbox(label="保存結果", interactive=False, max_lines=2)
 
-                # DBに保存する関数
-                def save_plan_to_db(result_df, plan_name, user_state_dict):
-                    """生成した輪作計画をDBに保存"""
+                # 作付履歴に保存する関数
+                def save_plan_to_crop_history(result_df, user_state_dict):
+                    """生成した輪作計画を作付履歴に保存"""
+                    from rotation_planner.common import CropHistoryRepository
+
                     if result_df is None or len(result_df) == 0:
                         return "エラー: 先に計画を生成してください"
-
-                    if not plan_name or not plan_name.strip():
-                        return "エラー: 計画名を入力してください"
 
                     if not user_state_dict or not user_state_dict.get("user_id"):
                         return "エラー: ログインが必要です"
@@ -449,8 +426,6 @@ def create_app():
                         field_code_to_id = {f.get('field_code'): f.get('id') for f in fields}
 
                         # DataFrameから計画詳細を抽出
-                        # result_tableは「ほ場×年」形式: 列名が年度、行がほ場
-                        details = []
                         df = result_df
 
                         # 非年度カラムを除外
@@ -458,97 +433,52 @@ def create_app():
                         field_col = df.columns[0]  # 最初の列がほ場情報
                         year_cols = [c for c in df.columns if c not in non_year_cols and (str(c).replace('R', '').replace('*', '').isdigit() or str(c).startswith('R'))]
 
+                        saved_count = 0
                         for _, row in df.iterrows():
                             field_code = str(row[field_col])
                             field_id = field_code_to_id.get(field_code)
                             if not field_id:
-                                continue  # ほ場が見つからない場合はスキップ
+                                continue
 
                             for year_col in year_cols:
                                 crop = str(row.get(year_col, "")).strip()
                                 if crop and crop != "nan":
-                                    details.append({
-                                        "field_id": field_id,
-                                        "year": str(year_col).replace('*', ''),  # *を除去
-                                        "crop": crop.replace('*', ''),  # *を除去
-                                    })
+                                    # *マークを除去して保存
+                                    year_str = str(year_col).replace('*', '')
+                                    crop_clean = crop.replace('*', '')
 
-                        if not details:
+                                    # 作付履歴に追加（INSERT OR REPLACE）
+                                    CropHistoryRepository.add_history(
+                                        field_id=field_id,
+                                        year=year_str,
+                                        crop=crop_clean,
+                                        is_inferred=False
+                                    )
+                                    saved_count += 1
+
+                        if saved_count == 0:
                             return "エラー: 保存するデータがありません"
 
-                        # 年の範囲を取得（R7形式やR2026形式に対応）
-                        def parse_year(y):
-                            y_str = str(y)
-                            if y_str.startswith("R"):
-                                num = y_str[1:]
-                                if len(num) <= 2:  # R7 -> 2025 (令和7年)
-                                    return 2018 + int(num)
-                                else:  # R2026 -> 2026
-                                    return int(num)
-                            return int(y_str)
-
-                        try:
-                            years = [parse_year(d["year"]) for d in details if d.get("year")]
-                            start_year = min(years) if years else 2026
-                            end_year = max(years) if years else 2030
-                        except (ValueError, TypeError):
-                            start_year = 2026
-                            end_year = 2030
-
-                        # 保存
-                        plan_data = {
-                            "name": plan_name.strip(),
-                            "start_year": start_year,
-                            "end_year": end_year,
-                            "details": details
-                        }
-                        plan_id = PlanRepository.create_plan(user_id=user_id, data=plan_data)
-
-                        return f"✅ 計画「{plan_name}」を保存しました（ID: {plan_id}）"
+                        return f"✅ {saved_count}件の作付データを保存しました\n（ほ場一覧タブで確認できます）"
 
                     except Exception as e:
                         return f"エラー: {str(e)}"
 
-                save_to_db_btn.click(
-                    fn=save_plan_to_db,
-                    inputs=[result_table, plan_name_input, user_state],
+                save_to_history_btn.click(
+                    fn=save_plan_to_crop_history,
+                    inputs=[result_table, user_state],
                     outputs=[save_result]
                 )
 
                 run_btn.click(
                     fn=run_optimization,
-                    inputs=[csv_file, area_unit, n_years, crop_text, constraints_table,
+                    inputs=[n_years, crop_text, constraints_table,
                             forbidden_text, preferred_text, main_crops_text, unknown_mode,
                             tensai_required, precision_mode, infer_unknown, district_grouping,
                             fields_state, past_years_state],
                     outputs=[result_table, summary_table, csv_download, message_box_rotation]
                 )
 
-                # 登録済みほ場を読み込むボタンのイベント
-                def load_registered_fields(user_state_dict):
-                    """登録済みほ場をDBから直接読み込む（CSV経由を廃止）+ 作物リスト更新"""
-                    if not user_state_dict or not user_state_dict.get("user_id"):
-                        return None, None, None, "エラー: ログインが必要です", ""
-
-                    user_id = user_state_dict.get("user_id")
-                    fields, past_years, error = get_fields_with_history(user_id)
-
-                    if error:
-                        return None, None, None, error, ""
-
-                    # ユーザーの作物リストを取得
-                    crops = get_default_crops(user_id)
-                    crops_text = "\n".join(crops) if crops else ""
-
-                    message = f"✅ {len(fields)}件のほ場を読み込みました（{len(past_years)}年分の履歴）"
-                    # csv_file は None にリセット、fields/past_years を State に保存
-                    return None, fields, past_years, message, crops_text
-
-                load_registered_fields_btn.click(
-                    fn=load_registered_fields,
-                    inputs=[user_state],
-                    outputs=[csv_file, fields_state, past_years_state, fields_status, crop_text]
-                )
 
             # =================================================================
             # 💊 農薬発注タブ（farmer, ja_staff, admin）
@@ -646,16 +576,6 @@ def create_app():
             from rotation_planner.field import get_crop_choices
             return get_crop_choices(user_state_dict)
 
-        # 作付履歴タブの初期化
-        def init_crop_history_tab(user_state_dict):
-            """作付履歴タブの初期化"""
-            if not user_state_dict or not user_state_dict.get("user_id"):
-                import pandas as pd
-                return gr.Dropdown(choices=[], value=[]), pd.DataFrame(), ""
-
-            from rotation_planner.crop_history.ui import load_initial_history
-            return load_initial_history(user_state_dict)
-
         # 防除記録タブの初期化
         def init_pesticide_record_tab(user_state_dict):
             """防除記録タブの初期化（ほ場選択肢を設定）"""
@@ -664,6 +584,52 @@ def create_app():
                 return empty, empty, empty
 
             return load_initial_fields(user_state_dict)
+
+        # ほ場一覧タブの初期化
+        def init_field_list_tab(user_state_dict):
+            """ほ場一覧タブの初期化"""
+            import pandas as pd
+            from rotation_planner.common.year_utils import get_current_fiscal_year
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                return pd.DataFrame(), gr.Dropdown(choices=["（未設定）"], value="（未設定）")
+
+            # ほ場一覧を取得（過去2年〜2年後）
+            current_reiwa = get_current_fiscal_year()
+            current_num = int(current_reiwa[1:])
+            start_year = f"R{current_num - 2}"
+            end_year = f"R{current_num + 2}"
+
+            df = field_list_components["load_fn"](
+                start_year,
+                end_year,
+                user_state_dict
+            )
+            # 作物ドロップダウンを初期化
+            crop_dropdown = field_list_components["init_crop_fn"](user_state_dict)
+
+            return df, crop_dropdown
+
+        # 輪作計画タブの初期化（ほ場自動読み込み）
+        def init_rotation_tab(user_state_dict):
+            """輪作計画タブの初期化 - 登録済みほ場を自動読み込み"""
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                return None, None, "ログインしてください", ""
+
+            user_id = user_state_dict.get("user_id")
+            fields, past_years, error = get_fields_with_history(user_id)
+
+            if error:
+                return None, None, error, ""
+
+            if not fields:
+                return None, None, "ほ場が登録されていません", ""
+
+            # ユーザーの作物リストを取得
+            crops = get_default_crops(user_id)
+            crops_text = "\n".join(crops) if crops else ""
+
+            message = f"✅ {len(fields)}件のほ場（{len(past_years)}年分の履歴）"
+            return fields, past_years, message, crops_text
 
         app.load(
             fn=on_app_load,
@@ -690,13 +656,20 @@ def create_app():
             inputs=[user_state],
             outputs=[field_components["crop_input"]]
         ).then(
-            fn=init_crop_history_tab,
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["kml_bulk_crop"]]
+        ).then(
+            fn=init_field_list_tab,
             inputs=[user_state],
             outputs=[
-                crop_history_components["field_selector"],
-                crop_history_components["history_table"],
-                crop_history_components["warning_area"]
+                field_list_components["field_list_table"],
+                field_list_components["edit_crop"]
             ]
+        ).then(
+            fn=init_rotation_tab,
+            inputs=[user_state],
+            outputs=[fields_state, past_years_state, fields_status, crop_text]
         ).then(
             fn=init_pesticide_record_tab,
             inputs=[user_state],
@@ -735,13 +708,20 @@ def create_app():
                 inputs=[user_state],
                 outputs=[field_components["crop_input"]]
             ).then(
-                fn=init_crop_history_tab,
+                fn=init_crop_dropdown,
+                inputs=[user_state],
+                outputs=[field_components["kml_bulk_crop"]]
+            ).then(
+                fn=init_field_list_tab,
                 inputs=[user_state],
                 outputs=[
-                    crop_history_components["field_selector"],
-                    crop_history_components["history_table"],
-                    crop_history_components["warning_area"]
+                    field_list_components["field_list_table"],
+                    field_list_components["edit_crop"]
                 ]
+            ).then(
+                fn=init_rotation_tab,
+                inputs=[user_state],
+                outputs=[fields_state, past_years_state, fields_status, crop_text]
             ).then(
                 fn=init_pesticide_record_tab,
                 inputs=[user_state],
@@ -753,16 +733,36 @@ def create_app():
             )
 
         # 作物設定変更時（自動保存後）にほ場登録の作物プルダウンを更新
+        def update_field_list_crop_dropdown(user_state_dict):
+            """ほ場一覧の作物ドロップダウンを更新"""
+            return field_list_components["init_crop_fn"](user_state_dict)
+
         crop_settings_components["crop_checkboxes"].change(
             fn=init_crop_dropdown,
             inputs=[user_state],
             outputs=[field_components["crop_input"]]
+        ).then(
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["kml_bulk_crop"]]
+        ).then(
+            fn=update_field_list_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_list_components["edit_crop"]]
         )
 
         crop_settings_components["add_custom_btn"].click(
             fn=init_crop_dropdown,
             inputs=[user_state],
             outputs=[field_components["crop_input"]]
+        ).then(
+            fn=init_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_components["kml_bulk_crop"]]
+        ).then(
+            fn=update_field_list_crop_dropdown,
+            inputs=[user_state],
+            outputs=[field_list_components["edit_crop"]]
         )
 
     return app

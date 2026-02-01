@@ -1,6 +1,9 @@
 """
 Gradio UIモジュール
 輪作計画メーカーのユーザーインターフェース
+
+注意: スタンドアロン版は非推奨です。
+ポータル (portal.py) 経由での使用を推奨します。
 """
 
 import gradio as gr
@@ -17,7 +20,7 @@ from .constraints import (
     update_constraints_table,
     update_constraints_from_csv
 )
-from .optimizer import run_optimization
+from .optimizer import run_optimization, generate_pdf_from_dataframe
 
 # アプリのパス
 APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +28,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 def create_app(auth_enabled: bool = False, auth_func=None):
     """
-    Gradioアプリを作成
+    Gradioアプリを作成（スタンドアロン版・非推奨）
 
     Args:
         auth_enabled: 認証を有効にするかどうか
@@ -33,6 +36,10 @@ def create_app(auth_enabled: bool = False, auth_func=None):
 
     Returns:
         gr.Blocks: Gradioアプリケーション
+
+    Note:
+        この関数はスタンドアロン版用です。
+        ポータル (portal.py) 経由での使用を推奨します。
     """
 
     with gr.Blocks(title="輪作計画メーカー") as app:
@@ -43,9 +50,11 @@ def create_app(auth_enabled: bool = False, auth_func=None):
         with gr.Row():
             with gr.Column(scale=4):
                 gr.Markdown("""
-                # 🌾 輪作計画メーカー
+                # 🌾 輪作計画メーカー（スタンドアロン版）
 
-                過去の作付データ（CSV）から、将来の輪作計画を自動生成します。
+                ⚠️ **この画面は非推奨です。ポータル経由でご利用ください。**
+
+                ほ場登録 → 輪作計画の流れでご利用いただけます。
                 """)
             with gr.Column(scale=1):
                 user_info_display = gr.Markdown("", elem_id="user_info")
@@ -72,10 +81,6 @@ def create_app(auth_enabled: bool = False, auth_func=None):
 
         app.load(on_load, outputs=[user_state, user_info_display])
 
-        with gr.Row():
-            gr.DownloadButton("📥 サンプルCSV", value=os.path.join(APP_DIR, "サンプルほ場.csv"))
-            gr.DownloadButton("📥 空テンプレート", value=os.path.join(APP_DIR, "ほ場テンプレート.csv"))
-
         gr.Markdown("""
         ### ⛔ 固定の禁止遷移
         - **てんさい→秋小麦**: 作期重複（ビート5-11月、秋小麦9月播種→翌7月収穫）
@@ -85,20 +90,12 @@ def create_app(auth_enabled: bool = False, auth_func=None):
 
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("## 📂 入力")
+                gr.Markdown("## ⚙️ 設定")
 
-                csv_file = gr.File(label="CSVファイル", file_types=[".csv"])
-
-                with gr.Row():
-                    area_unit = gr.Radio(
-                        choices=["a (アール)", "ha (ヘクタール)"],
-                        value="a (アール)",
-                        label="面積の単位"
-                    )
-                    n_years = gr.Slider(
-                        minimum=1, maximum=10, value=5, step=1,
-                        label="将来年数"
-                    )
+                n_years = gr.Slider(
+                    minimum=1, maximum=10, value=5, step=1,
+                    label="将来年数"
+                )
 
                 unknown_mode = gr.Radio(
                     choices=["制約をかけない（推奨）", "安全側（不明年を考慮）"],
@@ -202,38 +199,23 @@ def create_app(auth_enabled: bool = False, auth_func=None):
             outputs=[constraints_table]
         )
 
-        run_btn = gr.Button("🚀 計画を生成", variant="primary", size="lg")
+        # スタンドアロン版では機能しないことを明示
+        gr.Markdown("""
+        ---
+        ## ⚠️ スタンドアロン版について
 
-        gr.Markdown("## 📊 結果")
+        この画面はスタンドアロン版のため、**最適化機能は無効**です。
 
-        message_box = gr.Textbox(label="実行結果", lines=5, interactive=False)
+        ポータル (portal.py) を起動してご利用ください：
+        ```bash
+        python portal.py
+        ```
 
-        with gr.Tabs():
-            with gr.TabItem("ほ場×年 計画表"):
-                result_table = gr.Dataframe(
-                    label="ほ場別計画",
-                    interactive=False,
-                    wrap=True
-                )
-
-            with gr.TabItem("年別 面積合計"):
-                summary_table = gr.Dataframe(
-                    label="年別作物面積(ha)",
-                    interactive=False,
-                    wrap=True
-                )
-
-        csv_download = gr.File(label="📥 計画CSVダウンロード")
-
-        run_btn.click(
-            fn=run_optimization,
-            inputs=[
-                csv_file, area_unit, n_years, crop_text, constraints_table,
-                forbidden_text, preferred_text, main_crops_text, unknown_mode,
-                tensai_required, precision_mode, infer_unknown, district_grouping
-            ],
-            outputs=[result_table, summary_table, csv_download, message_box]
-        )
+        ポータルでは以下の流れで利用できます：
+        1. ほ場登録 → 地図でポリゴンを描画またはKMLインポート
+        2. 輪作計画 → 登録済みほ場を読み込んで最適化
+        3. ほ場一覧 → 年度別作物を確認・編集
+        """)
 
     return app
 
@@ -247,5 +229,9 @@ def create_rotation_planner_ui(user_state: gr.State = None):
 
     Returns:
         gr.Blocks: Gradioアプリケーション
+
+    Note:
+        スタンドアロン版は非推奨です。
+        ポータル (portal.py) 経由での使用を推奨します。
     """
     return create_app(auth_enabled=False)

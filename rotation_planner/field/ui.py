@@ -50,6 +50,23 @@ from rotation_planner.common import (
     format_warning,
     format_info,
 )
+from rotation_planner.common.year_utils import (
+    get_current_fiscal_year,
+    generate_year_choices,
+)
+
+
+# =============================================================================
+# 年度ヘルパー関数
+# =============================================================================
+
+def _get_year_choices():
+    """年度選択肢を生成（令和形式）"""
+    return generate_year_choices(start_offset=-2, end_offset=5)
+
+def _get_current_reiwa_year():
+    """現在の令和年度を取得"""
+    return get_current_fiscal_year()
 
 
 # =============================================================================
@@ -111,12 +128,13 @@ def refresh_map(user_state: Dict[str, Any]) -> str:
 # KML/KMZインポート機能
 # =============================================================================
 
-def process_kml_upload(file) -> Tuple[pd.DataFrame, str, str]:
+def process_kml_upload(file, user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str]:
     """
-    KML/KMZファイルをアップロードしてプレビュー
+    KML/KMZファイルをアップロードしてプレビュー（編集可能）
 
     Args:
         file: Gradioのファイルオブジェクト
+        user_state: ユーザー状態（作物リスト取得用）
 
     Returns:
         (プレビューDataFrame, メッセージ, 座標JSON)
@@ -139,8 +157,10 @@ def process_kml_upload(file) -> Tuple[pd.DataFrame, str, str]:
         df_data = fields_to_dataframe_format(fields)
         df = pd.DataFrame(df_data)
 
-        # 表示用に整形
-        display_df = df[["ほ場ID", "ほ場名", "面積(a)", "面積(ha)", "座標数"]].copy()
+        # 表示用に整形（作物・てんさい禁止列を追加）
+        display_df = df[["ほ場ID", "ほ場名", "面積(a)", "面積(ha)"]].copy()
+        display_df["作物"] = ""  # ユーザーが編集
+        display_df["てんさい禁止"] = False  # ユーザーが編集
 
         # 座標データをJSON化（登録時に使用）
         import json
@@ -154,7 +174,7 @@ def process_kml_upload(file) -> Tuple[pd.DataFrame, str, str]:
 
         return (
             display_df,
-            f"✅ {len(fields)}件のほ場を検出しました。確認して登録してください。",
+            f"✅ {len(fields)}件のほ場を検出しました。作物・てんさい禁止を設定して登録してください。",
             coords_json
         )
 
@@ -162,12 +182,14 @@ def process_kml_upload(file) -> Tuple[pd.DataFrame, str, str]:
         return pd.DataFrame(), f"❌ エラー: {str(e)}", "[]"
 
 
-def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
+def register_kml_fields(preview_df: pd.DataFrame, kml_coords_json: str, crop_year: str, user_state: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, str]:
     """
-    KMLから読み込んだほ場を一括登録
+    KMLから読み込んだほ場を一括登録（プレビューテーブルの編集内容を反映）
 
     Args:
+        preview_df: プレビューテーブル（ユーザーが編集した作物・てんさい禁止を含む）
         kml_coords_json: process_kml_uploadで生成した座標JSON
+        crop_year: 作付年度（令和形式、例: "R7"）
         user_state: ユーザー状態
 
     Returns:
@@ -182,21 +204,44 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
     if not kml_coords_json or kml_coords_json == "[]":
         return fields_to_dataframe(get_user_fields(user_id)), format_warning("インポートするデータがありません"), "[]", ""
 
+    if preview_df is None or preview_df.empty:
+        return fields_to_dataframe(get_user_fields(user_id)), format_warning("プレビューデータがありません"), "[]", ""
+
     try:
         kml_fields = json.loads(kml_coords_json)
     except json.JSONDecodeError:
         return fields_to_dataframe(get_user_fields(user_id)), format_error("データの読み込みに失敗しました"), "[]", ""
 
+    # プレビューDFをほ場IDでインデックス化
+    preview_dict = {}
+    for _, row in preview_df.iterrows():
+        field_id = row.get("ほ場ID", "")
+        preview_dict[field_id] = {
+            "name": row.get("ほ場名", ""),
+            "crop": row.get("作物", "") if pd.notna(row.get("作物")) else "",
+            "beet_forbidden": bool(row.get("てんさい禁止", False)),
+        }
+
     registered = 0
     errors = []
 
     for field in kml_fields:
+        field_id = field["field_id"]
         coords_str = json.dumps(field["coordinates"])
+
+        # プレビューから編集内容を取得
+        preview_data = preview_dict.get(field_id, {})
+        name = preview_data.get("name", field["name"])
+        crop = preview_data.get("crop", "")
+        beet_forbidden = preview_data.get("beet_forbidden", False)
+
         result = register_field_with_state(
-            field_id=field["field_id"],
+            field_id=field_id,
             district="",  # KMLには地区情報がないので空
-            name=field["name"],
-            beet_forbidden=False,
+            name=name,
+            crop_year=crop_year,
+            crop=crop,
+            beet_forbidden=beet_forbidden,
             coords_json=coords_str,
             user_state=user_state
         )
@@ -204,7 +249,7 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
         if "登録しました" in result[1]:
             registered += 1
         else:
-            errors.append(f"{field['field_id']}: {result[1]}")
+            errors.append(f"{field_id}: {result[1]}")
 
     # 最新のほ場一覧を取得
     fields = get_user_fields(user_id)
@@ -217,6 +262,29 @@ def register_kml_fields(kml_coords_json: str, user_state: Dict[str, Any]) -> Tup
         message = format_success(f"✅ {registered}件のほ場を登録しました")
 
     return fields_to_dataframe(fields), message, fields_json_str, next_id
+
+
+def apply_bulk_crop_to_preview(preview_df: pd.DataFrame, crop: str) -> pd.DataFrame:
+    """プレビューテーブルの全ほ場に作物を一括適用"""
+    if preview_df is None or preview_df.empty:
+        return preview_df
+
+    df = preview_df.copy()
+    if crop and crop != "（未設定）":
+        df["作物"] = crop
+    else:
+        df["作物"] = ""
+    return df
+
+
+def apply_bulk_beet_forbidden_to_preview(preview_df: pd.DataFrame, beet_forbidden: bool) -> pd.DataFrame:
+    """プレビューテーブルの全ほ場にてんさい禁止を一括適用"""
+    if preview_df is None or preview_df.empty:
+        return preview_df
+
+    df = preview_df.copy()
+    df["てんさい禁止"] = beet_forbidden
+    return df
 
 
 # =============================================================================
@@ -408,10 +476,36 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
             kml_upload_btn = gr.Button("📂 ファイルを読み込む")
             kml_message = gr.Textbox(label="読み込み結果", interactive=False)
 
+            # 一括設定エリア
+            gr.Markdown("### 一括設定")
+            with gr.Row():
+                kml_bulk_year = gr.Dropdown(
+                    label="作付年度",
+                    choices=_get_year_choices(),
+                    value=_get_current_reiwa_year(),
+                    scale=1
+                )
+                kml_bulk_crop = gr.Dropdown(
+                    label="作物",
+                    choices=["（未設定）"],
+                    value="（未設定）",
+                    scale=2
+                )
+                kml_bulk_crop_btn = gr.Button("📋 全ほ場に適用", scale=1)
+
+            with gr.Row():
+                kml_bulk_beet_forbidden = gr.Checkbox(
+                    label="てんさい禁止",
+                    value=False,
+                    scale=2
+                )
+                kml_bulk_beet_btn = gr.Button("📋 全ほ場に適用", scale=1)
+
             kml_preview_table = gr.Dataframe(
-                value=pd.DataFrame(columns=["ほ場ID", "ほ場名", "面積(a)", "面積(ha)", "座標数"]),
+                value=pd.DataFrame(columns=["ほ場ID", "ほ場名", "面積(a)", "面積(ha)", "作物", "てんさい禁止"]),
                 label="プレビュー",
-                interactive=False
+                interactive=True,
+                column_widths=["15%", "25%", "15%", "15%", "20%", "10%"],
             )
 
             # 隠しフィールド（KML座標データ）
@@ -437,13 +531,22 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
                 placeholder="例: 北1号"
             )
 
-            # 今年の作物（ユーザーが設定した作物から選択）
-            crop_input = gr.Dropdown(
-                label="今年の作物",
-                choices=["（未設定）"],
-                value="（未設定）",
-                allow_custom_value=False,
-            )
+            # 作付年度と作物（ユーザーが設定した作物から選択）
+            gr.Markdown("### 作付情報（任意）")
+            with gr.Row():
+                crop_year_input = gr.Dropdown(
+                    label="作付年度",
+                    choices=_get_year_choices(),
+                    value=_get_current_reiwa_year(),
+                    scale=1
+                )
+                crop_input = gr.Dropdown(
+                    label="作物",
+                    choices=["（未設定）"],
+                    value="（未設定）",
+                    allow_custom_value=False,
+                    scale=2
+                )
 
             beet_forbidden_input = gr.Checkbox(
                 label="馬鈴薯・てんさい禁止",
@@ -527,7 +630,7 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
 
     register_btn.click(
         fn=register_field_with_state,
-        inputs=[field_id_input, district_input, name_input, crop_input, beet_forbidden_input, coords_input, user_state],
+        inputs=[field_id_input, district_input, name_input, crop_year_input, crop_input, beet_forbidden_input, coords_input, user_state],
         outputs=[field_table, message_box, fields_json, field_id_input]
     ).then(
         fn=refresh_map,
@@ -566,13 +669,26 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
     # KML/KMZインポート
     kml_upload_btn.click(
         fn=process_kml_upload,
-        inputs=[kml_file_input],
+        inputs=[kml_file_input, user_state],
         outputs=[kml_preview_table, kml_message, kml_coords_json]
+    )
+
+    # 一括適用ボタン
+    kml_bulk_crop_btn.click(
+        fn=apply_bulk_crop_to_preview,
+        inputs=[kml_preview_table, kml_bulk_crop],
+        outputs=[kml_preview_table]
+    )
+
+    kml_bulk_beet_btn.click(
+        fn=apply_bulk_beet_forbidden_to_preview,
+        inputs=[kml_preview_table, kml_bulk_beet_forbidden],
+        outputs=[kml_preview_table]
     )
 
     kml_register_btn.click(
         fn=register_kml_fields,
-        inputs=[kml_coords_json, user_state],
+        inputs=[kml_preview_table, kml_coords_json, kml_bulk_year, user_state],
         outputs=[field_table, message_box, fields_json, field_id_input]
     ).then(
         fn=refresh_map,
@@ -587,7 +703,9 @@ def create_field_register_ui(user_state: gr.State) -> Dict[str, Any]:
         "field_table": field_table,
         "message_box": message_box,
         "field_id_input": field_id_input,
+        "crop_year_input": crop_year_input,
         "crop_input": crop_input,
+        "kml_bulk_crop": kml_bulk_crop,  # KML一括設定用作物ドロップダウン
         "load_fn": load_initial_data,
     }
 

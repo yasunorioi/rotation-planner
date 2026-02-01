@@ -109,6 +109,12 @@ from .crop_settings import (
     delete_custom_crop,
 )
 
+# ほ場一覧UIモジュール
+from .field_list_ui import (
+    create_field_list_ui,
+    get_fields_with_yearly_crops,
+)
+
 # 筆ポリゴンモジュール
 from .fude_polygon import (
     # 定数
@@ -194,4 +200,7 @@ __all__ = [
     "generate_fude_polygon_control_html",
     "get_fude_download_url",
     "download_fude_geojson",
+    # ほ場一覧UI
+    "create_field_list_ui",
+    "get_fields_with_yearly_crops",
 ]

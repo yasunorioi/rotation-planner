@@ -779,38 +779,28 @@ def run_sensitivity_analysis(fields: List[Field], past_years: List[str],
 # メイン最適化関数
 # =============================================================================
 
-def run_optimization(csv_file, area_unit, n_years, crop_text, constraints_table,
+def run_optimization(n_years, crop_text, constraints_table,
                     forbidden_text, preferred_text, main_crops_text, unknown_mode,
                     tensai_required, precision_mode, infer_unknown_flag, district_grouping,
-                    fields: Optional[List[Field]] = None,
-                    past_years: Optional[List[str]] = None):
+                    fields: List[Field], past_years: List[str]):
     """最適化を実行
 
     Args:
-        csv_file: CSVファイル（Gradioアップロード）
-        area_unit: 面積単位
-        ... (その他の既存引数)
-        fields: ほ場リスト（DB等から直接渡す場合）
-        past_years: 過去年リスト（fieldsと一緒に渡す）
-
-    Note:
-        - csv_file が渡された場合: 従来通りCSVから読み込み
-        - fields/past_years が渡された場合: 直接使用（DB対応）
-        - 両方Noneの場合: エラー
+        n_years: 将来年数
+        crop_text: 作物リスト（改行区切り）
+        constraints_table: 制約テーブル
+        forbidden_text: 追加禁止遷移
+        preferred_text: 優先遷移
+        main_crops_text: 主作物
+        unknown_mode: 空欄の扱い
+        tensai_required: てんさい必須フラグ
+        precision_mode: 計算精度
+        infer_unknown_flag: 空欄推論フラグ
+        district_grouping: 地区まとめフラグ
+        fields: ほ場リスト
+        past_years: 過去年リスト
     """
     from .utils import infer_unknown_crops
-
-    # データソースの決定
-    if fields is not None and past_years is not None:
-        # DB等から直接渡された場合はそのまま使用
-        pass
-    elif csv_file is not None:
-        # CSV読み込み（従来の動作）
-        fields, past_years, error = load_csv(csv_file.name, area_unit)
-        if error:
-            return None, None, None, error
-    else:
-        return None, None, None, "エラー: CSVファイルまたはほ場データを指定してください"
 
     if not fields:
         return None, None, None, "エラー: ほ場データがありません"
@@ -901,3 +891,149 @@ def run_optimization(csv_file, area_unit, n_years, crop_text, constraints_table,
         message += f"📊 ボトルネック分析: 実行できませんでした ({e})\n"
 
     return field_df, summary_df, csv_path, message
+
+
+# =============================================================================
+# PDF出力
+# =============================================================================
+
+def generate_pdf_from_dataframe(field_df, summary_df, title: str = "輪作計画") -> str:
+    """
+    輪作計画のPDFを生成
+
+    Args:
+        field_df: ほ場×年の計画DataFrame
+        summary_df: 年別作物面積のサマリーDataFrame
+        title: PDFタイトル
+
+    Returns:
+        生成したPDFファイルのパス
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from datetime import datetime
+    import os
+
+    # 日本語フォント登録（システムフォントを探す）
+    font_paths = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/ipafont/ipag.ttf",
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        # macOS
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]
+
+    font_name = "Helvetica"  # フォールバック
+    for font_path in font_paths:
+        if os.path.exists(font_path):
+            try:
+                pdfmetrics.registerFont(TTFont('JapaneseFont', font_path))
+                font_name = 'JapaneseFont'
+                break
+            except Exception:
+                continue
+
+    pdf_path = "/tmp/輪作計画.pdf"
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=landscape(A4),
+        rightMargin=10*mm,
+        leftMargin=10*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+
+    elements = []
+
+    # スタイル
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'JapaneseTitle',
+        parent=styles['Heading1'],
+        fontName=font_name,
+        fontSize=16,
+        spaceAfter=10*mm
+    )
+    subtitle_style = ParagraphStyle(
+        'JapaneseSubtitle',
+        parent=styles['Heading2'],
+        fontName=font_name,
+        fontSize=12,
+        spaceAfter=5*mm
+    )
+    normal_style = ParagraphStyle(
+        'JapaneseNormal',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=8
+    )
+
+    # タイトル
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    elements.append(Paragraph(f"{title}", title_style))
+    elements.append(Paragraph(f"出力日時: {now}", normal_style))
+    elements.append(Spacer(1, 5*mm))
+
+    # ほ場×年 計画表
+    if field_df is not None and not field_df.empty:
+        elements.append(Paragraph("■ ほ場×年 計画表", subtitle_style))
+
+        # DataFrameをテーブルデータに変換
+        table_data = [list(field_df.columns)]
+        for _, row in field_df.iterrows():
+            table_data.append([str(v) if v is not None else "" for v in row.values])
+
+        # 列幅を計算（横長なので均等分割）
+        num_cols = len(field_df.columns)
+        available_width = landscape(A4)[0] - 20*mm
+        col_width = available_width / num_cols
+
+        table = Table(table_data, colWidths=[col_width] * num_cols)
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 10*mm))
+
+    # 年別作物面積サマリー
+    if summary_df is not None and not summary_df.empty:
+        elements.append(Paragraph("■ 年別 作物面積(ha)", subtitle_style))
+
+        table_data = [list(summary_df.columns)]
+        for _, row in summary_df.iterrows():
+            table_data.append([str(v) if v is not None else "" for v in row.values])
+
+        num_cols = len(summary_df.columns)
+        col_width = min(25*mm, available_width / num_cols)
+
+        table = Table(table_data, colWidths=[col_width] * num_cols)
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.9, 0.95, 1.0)]),
+        ]))
+        elements.append(table)
+
+    doc.build(elements)
+    return pdf_path

@@ -34,15 +34,6 @@ def export_fields(user_state: Dict[str, Any]) -> Tuple[Optional[str], str]:
         return export_csv_with_state(user_state)
 
 
-def export_rotation_plans(user_state: Dict[str, Any]) -> Tuple[Optional[str], str]:
-    """輪作計画CSVエクスポート"""
-    try:
-        from rotation_planner.common.export import export_all_plans_csv
-        return export_all_plans_csv(user_state)
-    except ImportError:
-        return None, "エラー: エクスポート機能が利用できません"
-
-
 def export_pesticide_orders(
     summary_data: list,
     detail_data: list = None,
@@ -379,13 +370,6 @@ def create_data_management_ui(user_state: gr.State):
                 export_fields_file = gr.File(label="ダウンロード", interactive=False)
                 export_fields_msg = gr.Textbox(label="結果", interactive=False, lines=1)
 
-            # --- 輪作計画エクスポート ---
-            with gr.Column():
-                gr.Markdown("### 🌾 輪作計画")
-                export_plans_btn = gr.Button("📥 輪作計画をダウンロード", variant="primary")
-                export_plans_file = gr.File(label="ダウンロード", interactive=False)
-                export_plans_msg = gr.Textbox(label="結果", interactive=False, lines=1)
-
             # --- 農薬発注エクスポート ---
             with gr.Column():
                 gr.Markdown("### 💊 農薬発注")
@@ -454,13 +438,6 @@ def create_data_management_ui(user_state: gr.State):
         outputs=[export_fields_file, export_fields_msg]
     )
 
-    # エクスポート: 輪作計画
-    export_plans_btn.click(
-        fn=export_rotation_plans,
-        inputs=[user_state],
-        outputs=[export_plans_file, export_plans_msg]
-    )
-
     # インポート: ほ場
     import_fields_btn.click(
         fn=import_fields_csv,
@@ -477,7 +454,6 @@ def create_data_management_ui(user_state: gr.State):
 
     return {
         "export_fields_btn": export_fields_btn,
-        "export_plans_btn": export_plans_btn,
         "import_fields_btn": import_fields_btn,
         "import_plan_btn": import_plan_btn,
     }

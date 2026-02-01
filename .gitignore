@@ -46,3 +46,5 @@ hf_token.sh
 data/backups/
 # 内部ドキュメント（非公開）
 docs/specs/
+CLAUDE.md
+ROADMAP.md

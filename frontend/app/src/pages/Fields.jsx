@@ -51,7 +51,7 @@ export default function Fields() {
   const [selectedFieldId, setSelectedFieldId] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyForm, setHistoryForm] = useState({ year: new Date().getFullYear() - 1, crop: '' });
+  const [historyForm, setHistoryForm] = useState({ year: new Date().getFullYear(), crop: '' });
 
   // 年度別表示関連
   const currentYear = new Date().getFullYear();
@@ -242,7 +242,7 @@ export default function Fields() {
       await fieldApi.addHistory(selectedFieldId, historyForm.year, historyForm.crop);
       const data = await fieldApi.getHistory(selectedFieldId);
       setHistory(data);
-      setHistoryForm({ year: new Date().getFullYear() - 1, crop: '' });
+      setHistoryForm({ year: new Date().getFullYear(), crop: '' });
     } catch (err) {
       alert('追加に失敗しました');
     }
@@ -259,7 +259,7 @@ export default function Fields() {
     return field ? (field.field_name || field.field_code) : '';
   };
 
-  const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 1 - i);
+  const years = Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i);
 
   // ========== 年度別作物編集 ==========
   const handleCellClick = (field, year) => {
@@ -353,15 +353,6 @@ export default function Fields() {
           <div className="modal">
             <h2>ほ場編集</h2>
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>ほ場コード *</label>
-                <input
-                  type="text"
-                  value={formData.field_code}
-                  onChange={(e) => setFormData({ ...formData, field_code: e.target.value })}
-                  required
-                />
-              </div>
               <div className="form-group">
                 <label>ほ場名</label>
                 <input

@@ -40,6 +40,7 @@ from rotation_planner.common import (
     PesticideMasterRepository,
     PesticideOrderRepository,
     PesticideRecordRepository,
+    PesticideUsageRepository,
     InventoryRepository,
     JAStaffRepository,
     ensure_crop_tables,
@@ -64,7 +65,7 @@ from rotation_planner.app.utils import Field
 from rotation_planner.app.constraints import Constraints, FIXED_FORBIDDEN_TRANSITIONS
 
 # 在庫管理API
-from inventory_api import router as inventory_router, create_inventory_routes, ensure_inventory_tables
+from api.inventory_api import router as inventory_router, create_inventory_routes, ensure_inventory_tables
 
 # =============================================================================
 # アプリケーション設定
@@ -90,6 +91,14 @@ app.add_middleware(
 def startup_event():
     ensure_crop_tables()
     ensure_inventory_tables()
+    # FAMIC自動更新チェック（半年経過していれば更新）
+    try:
+        from rotation_planner.famic import check_and_update_if_needed
+        result = check_and_update_if_needed()
+        if result:
+            print(f"FAMIC data auto-updated: {result.get('basic_count', 0)} records")
+    except Exception as e:
+        print(f"FAMIC auto-update check failed: {e}")
 
 # JWT設定
 JWT_SECRET = os.environ.get("JWT_SECRET")
@@ -142,6 +151,7 @@ class FieldCreate(BaseModel):
     district: Optional[str] = None
     area_ha: float  # 正の値が必要（エンドポイントでバリデーション）
     beet_forbidden: bool = False
+    coordinates_json: Optional[str] = None  # ポリゴン座標JSON
     # 初期作付情報（任意）
     crop_year: Optional[str] = None  # 令和形式 (例: "R7") または西暦 (例: "2025")
     crop_name: Optional[str] = None  # 作物名
@@ -163,6 +173,7 @@ class FieldResponse(BaseModel):
     district: Optional[str] = None
     area_ha: float
     beet_forbidden: bool = False
+    coordinates_json: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -176,6 +187,7 @@ class FieldResponse(BaseModel):
             district=data.get("district"),
             area_ha=data["area_ha"],
             beet_forbidden=bool(data.get("beet_forbidden", 0)),
+            coordinates_json=data.get("coordinates_json"),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
         )
@@ -851,6 +863,7 @@ class FamicStatusResponse(BaseModel):
     last_update: Optional[str]
     auto_update_enabled: bool
     next_update: Optional[str]
+    terms_accepted: bool = False  # 利用規約同意済みか
 
 
 class FamicUpdateResponse(BaseModel):
@@ -872,12 +885,13 @@ def get_famic_status(current_user: Dict = Depends(require_admin)):
             usage_count=stats.get("usage_count", 0),
             last_update=stats.get("last_basic_import"),
             auto_update_enabled=settings.get("auto_update_enabled", False),
-            next_update=settings.get("next_update")
+            next_update=settings.get("next_update"),
+            terms_accepted=settings.get("terms_accepted", False)
         )
     except ImportError:
         return FamicStatusResponse(
             registry_count=0, usage_count=0, last_update=None,
-            auto_update_enabled=False, next_update=None
+            auto_update_enabled=False, next_update=None, terms_accepted=False
         )
 
 
@@ -912,6 +926,17 @@ def set_famic_auto_update(enabled: bool, current_user: Dict = Depends(require_ad
         set_famic_settings(auto_update_enabled=enabled)
         status = "有効" if enabled else "無効"
         return {"success": True, "message": f"自動更新を「{status}」に変更しました"}
+    except ImportError:
+        raise HTTPException(status_code=500, detail="FAMICモジュールが利用できません")
+
+
+@app.post("/api/admin/famic/accept-terms")
+def accept_famic_terms(current_user: Dict = Depends(require_admin)):
+    """FAMIC利用規約に同意"""
+    try:
+        from rotation_planner.famic import set_famic_settings
+        set_famic_settings(terms_accepted=True)
+        return {"success": True, "message": "FAMIC利用規約に同意しました"}
     except ImportError:
         raise HTTPException(status_code=500, detail="FAMICモジュールが利用できません")
 
@@ -959,7 +984,8 @@ def create_field(field: FieldCreate, current_user: Dict = Depends(get_current_us
                 "name": field.field_name,
                 "district": field.district,
                 "area_ha": field.area_ha,
-                "beet_forbidden": field.beet_forbidden
+                "beet_forbidden": field.beet_forbidden,
+                "coordinates_json": field.coordinates_json,
             }
         )
         created = FieldRepository.get_field(field_id)
@@ -1516,6 +1542,53 @@ def delete_custom_crop(user_crop_id: int, current_user: Dict = Depends(get_curre
     user_crops.id を指定して削除する。
     """
     UserCropRepository.remove_user_crop(current_user["id"], user_crop_id)
+
+
+# =============================================================================
+# FAMIC作物名検索エンドポイント
+# =============================================================================
+
+@app.get("/api/famic/crops")
+def search_famic_crops(q: Optional[str] = None, limit: int = 50, current_user: Dict = Depends(get_current_user)):
+    """
+    FAMIC登録適用情報から作物名を検索
+
+    パラメータ:
+    - q: 検索キーワード（部分一致）
+    - limit: 最大件数（デフォルト50）
+
+    Returns:
+        作物名のリスト
+    """
+    crops = PesticideUsageRepository.get_distinct_crops(q, limit)
+    return crops
+
+
+@app.post("/api/crops/from-famic", status_code=201)
+def add_crop_from_famic(name: str, current_user: Dict = Depends(require_admin)):
+    """
+    FAMIC作物名をマスタ作物として追加（管理者のみ）
+
+    FAMIC適用情報に存在する作物名をcrop_masterに追加する。
+    """
+    # FAMIC作物名として存在するか確認
+    famic_crops = PesticideUsageRepository.get_distinct_crops(name, 1)
+    exact_match = [c for c in famic_crops if c == name]
+    if not exact_match:
+        # 部分一致で探す
+        famic_crops = PesticideUsageRepository.get_distinct_crops(name, 100)
+        exact_match = [c for c in famic_crops if c == name]
+        if not exact_match:
+            raise HTTPException(status_code=400, detail=f"FAMIC適用情報に '{name}' が見つかりません")
+
+    # 既に登録されているか確認
+    existing = CropMasterRepository.get_all(active_only=False)
+    if any(c["name"] == name for c in existing):
+        raise HTTPException(status_code=400, detail=f"'{name}' は既に登録されています")
+
+    # マスタに追加
+    crop_id = CropMasterRepository.create(name)
+    return {"status": "ok", "id": crop_id, "name": name}
 
 
 # =============================================================================

@@ -512,9 +512,9 @@ class RotationPlannerORTools:
                     field_over[c, y] = model.NewIntVar(0, self.num_fields, f'field_over_{c}_{y}')
                     model.Add(field_over[c, y] >= count - max_f)
 
-        # 制約9: 馬鈴薯・てんさい禁止ほ場
+        # 制約9: ばれいしょ・てんさい禁止ほ場（FAMIC表記）
         beet_idx = self.crop_to_idx.get("てんさい")
-        potato_idx = self.crop_to_idx.get("馬鈴薯")
+        potato_idx = self.crop_to_idx.get("ばれいしょ")
         for f_idx, fld in enumerate(self.fields):
             if fld.beet_forbidden:
                 for y in range(self.num_future_years):

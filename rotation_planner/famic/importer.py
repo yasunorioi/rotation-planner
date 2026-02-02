@@ -368,6 +368,7 @@ def get_famic_settings() -> Dict[str, Any]:
             "auto_update_enabled": bool,
             "last_update": str or None (ISO 8601),
             "next_update": str or None (ISO 8601),
+            "terms_accepted": bool,
         }
     """
     settings = _load_settings()
@@ -375,6 +376,7 @@ def get_famic_settings() -> Dict[str, Any]:
 
     auto_update = famic.get("auto_update_enabled", False)
     last_update = famic.get("last_update")
+    terms_accepted = famic.get("terms_accepted", False)
     next_update = None
 
     if last_update and auto_update:
@@ -389,21 +391,30 @@ def get_famic_settings() -> Dict[str, Any]:
         "auto_update_enabled": auto_update,
         "last_update": last_update,
         "next_update": next_update,
+        "terms_accepted": terms_accepted,
     }
 
 
-def set_famic_settings(auto_update_enabled: bool) -> None:
+def set_famic_settings(
+    auto_update_enabled: bool = None,
+    terms_accepted: bool = None
+) -> None:
     """
-    FAMIC自動更新設定を保存
+    FAMIC設定を保存
 
     Args:
-        auto_update_enabled: 自動更新を有効にするか
+        auto_update_enabled: 自動更新を有効にするか（Noneの場合は変更しない）
+        terms_accepted: 利用規約に同意したか（Noneの場合は変更しない）
     """
     settings = _load_settings()
     if "famic" not in settings:
         settings["famic"] = {}
 
-    settings["famic"]["auto_update_enabled"] = auto_update_enabled
+    if auto_update_enabled is not None:
+        settings["famic"]["auto_update_enabled"] = auto_update_enabled
+    if terms_accepted is not None:
+        settings["famic"]["terms_accepted"] = terms_accepted
+
     _save_settings(settings)
 
 

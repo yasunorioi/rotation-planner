@@ -167,6 +167,24 @@ export default function SystemInfo() {
     }
   };
 
+  const handleAcceptFamicTerms = async () => {
+    const confirmed = window.confirm(
+      'FAMICの利用規約に同意しますか？\n\n' +
+      '農林水産消費安全技術センター（FAMIC）の農薬登録情報を利用するには、' +
+      'FAMICの利用規約への同意が必要です。\n\n' +
+      '利用規約: https://www.acis.famic.go.jp/ddata/index.htm'
+    );
+    if (!confirmed) return;
+
+    try {
+      await adminApi.acceptFamicTerms();
+      setFamicMessage({ type: 'success', text: 'FAMIC利用規約に同意しました' });
+      loadFamicStatus();
+    } catch (err) {
+      setFamicMessage({ type: 'error', text: '同意処理に失敗しました' });
+    }
+  };
+
   if (user?.role !== 'admin') {
     return (
       <div className="system-info-page">
@@ -419,52 +437,90 @@ export default function SystemInfo() {
               の農薬登録情報をダウンロードしてDBに取り込みます。
             </p>
 
-            {famicStatus && (
-              <div className="info-card" style={{ marginBottom: '20px' }}>
-                <h3>現在の状態</h3>
-                <dl>
-                  <dt>登録農薬数</dt>
-                  <dd>{famicStatus.registry_count.toLocaleString()} 件</dd>
-                  <dt>適用基準数</dt>
-                  <dd>{famicStatus.usage_count.toLocaleString()} 件</dd>
-                  <dt>最終更新</dt>
-                  <dd>{famicStatus.last_update || '未実行'}</dd>
-                  <dt>自動更新</dt>
-                  <dd>{famicStatus.auto_update_enabled ? '有効' : '無効'}</dd>
-                  {famicStatus.next_update && (
-                    <>
-                      <dt>次回更新予定</dt>
-                      <dd>{famicStatus.next_update}</dd>
-                    </>
-                  )}
-                </dl>
+            {/* 利用規約同意セクション */}
+            {famicStatus && !famicStatus.terms_accepted && (
+              <div style={{
+                background: '#fff3e0',
+                border: '1px solid #ffcc80',
+                borderRadius: '8px',
+                padding: '20px',
+                marginBottom: '20px'
+              }}>
+                <h3 style={{ margin: '0 0 10px 0', color: '#e65100' }}>利用規約への同意が必要です</h3>
+                <p style={{ marginBottom: '15px' }}>
+                  FAMICの農薬登録情報を利用するには、利用規約への同意が必要です。
+                </p>
+                <p style={{ marginBottom: '15px', fontSize: '0.9em', color: '#666' }}>
+                  利用規約は以下のリンクからご確認ください：<br />
+                  <a
+                    href="https://www.acis.famic.go.jp/ddata/index.htm"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#1976d2' }}
+                  >
+                    https://www.acis.famic.go.jp/ddata/index.htm
+                  </a>
+                </p>
+                <button
+                  onClick={handleAcceptFamicTerms}
+                  className="btn-primary"
+                  style={{ background: '#ff9800' }}
+                >
+                  利用規約に同意する
+                </button>
               </div>
             )}
 
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={famicStatus?.auto_update_enabled || false}
-                  onChange={(e) => handleFamicAutoUpdateChange(e.target.checked)}
-                  style={{ width: '20px', height: '20px' }}
-                />
-                <span>自動更新を有効にする（半年ごと）</span>
-              </label>
-            </div>
+            {famicStatus && famicStatus.terms_accepted && (
+              <>
+                <div className="info-card" style={{ marginBottom: '20px' }}>
+                  <h3>現在の状態</h3>
+                  <dl>
+                    <dt>利用規約</dt>
+                    <dd style={{ color: '#4caf50' }}>同意済み</dd>
+                    <dt>登録農薬数</dt>
+                    <dd>{famicStatus.registry_count.toLocaleString()} 件</dd>
+                    <dt>適用基準数</dt>
+                    <dd>{famicStatus.usage_count.toLocaleString()} 件</dd>
+                    <dt>最終更新</dt>
+                    <dd>{famicStatus.last_update || '未実行'}</dd>
+                    <dt>自動更新</dt>
+                    <dd>{famicStatus.auto_update_enabled ? '有効' : '無効'}</dd>
+                    {famicStatus.next_update && (
+                      <>
+                        <dt>次回更新予定</dt>
+                        <dd>{famicStatus.next_update}</dd>
+                      </>
+                    )}
+                  </dl>
+                </div>
 
-            <div>
-              <button
-                onClick={handleFamicUpdate}
-                disabled={famicUpdating}
-                className="btn-primary"
-              >
-                {famicUpdating ? '更新中...' : '今すぐ更新'}
-              </button>
-              <p style={{ color: '#666', fontSize: '0.9em', marginTop: '5px' }}>
-                ※ 数分かかる場合があります
-              </p>
-            </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={famicStatus?.auto_update_enabled || false}
+                      onChange={(e) => handleFamicAutoUpdateChange(e.target.checked)}
+                      style={{ width: '20px', height: '20px' }}
+                    />
+                    <span>自動更新を有効にする（半年ごと）</span>
+                  </label>
+                </div>
+
+                <div>
+                  <button
+                    onClick={handleFamicUpdate}
+                    disabled={famicUpdating}
+                    className="btn-primary"
+                  >
+                    {famicUpdating ? '更新中...' : '今すぐ更新'}
+                  </button>
+                  <p style={{ color: '#666', fontSize: '0.9em', marginTop: '5px' }}>
+                    ※ 数分かかる場合があります
+                  </p>
+                </div>
+              </>
+            )}
 
             {famicMessage && (
               <div className={`message ${famicMessage.type}`} style={{ marginTop: '15px' }}>

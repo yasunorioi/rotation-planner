@@ -1039,15 +1039,15 @@ def ensure_crop_tables():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            # 初期データ投入
+            # 初期データ投入（FAMIC表記に準拠）
             initial_crops = [
-                ('春小麦', '穀物', 1),
-                ('秋小麦', '穀物', 2),
-                ('大豆', '豆類', 3),
+                ('小麦(春播)', '穀物', 1),
+                ('小麦(秋播)', '穀物', 2),
+                ('だいず', '豆類', 3),
                 ('てんさい', '根菜', 4),
-                ('馬鈴薯', '根菜', 5),
-                ('小豆', '豆類', 6),
-                ('玉ねぎ', '野菜', 7),
+                ('ばれいしょ', '根菜', 5),
+                ('あずき', '豆類', 6),
+                ('たまねぎ', '野菜', 7),
                 ('にんじん', '野菜', 8),
                 ('かぼちゃ', '野菜', 9),
                 ('スイートコーン', '穀物', 10),
@@ -1816,6 +1816,31 @@ class PesticideUsageRepository:
                 (f"%{keyword}%", limit)
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def get_distinct_crops(keyword: str = None, limit: int = 50) -> List[str]:
+        """FAMIC適用情報からユニークな作物名一覧を取得"""
+        with get_db() as conn:
+            if keyword:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT crop FROM pesticide_usage
+                    WHERE crop LIKE ?
+                    ORDER BY crop
+                    LIMIT ?
+                    """,
+                    (f"%{keyword}%", limit)
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT crop FROM pesticide_usage
+                    ORDER BY crop
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
+            return [row[0] for row in cursor.fetchall() if row[0]]
 
     @staticmethod
     def get_for_pesticide_and_crop(pesticide_id: int, crop: str) -> List[Dict[str, Any]]:

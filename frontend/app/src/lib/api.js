@@ -257,6 +257,27 @@ export const cropApi = {
   deleteCustomCrop: async (userCropId) => {
     await api.delete(`/api/user-crops/${userCropId}`);
   },
+  /**
+   * FAMIC登録適用情報から作物名を検索
+   * @param {string} keyword - 検索キーワード（部分一致）
+   * @param {number} limit - 最大件数（デフォルト50）
+   * @returns {Promise<string[]>} 作物名の配列
+   */
+  searchFamicCrops: async (keyword = null, limit = 50) => {
+    const params = { limit };
+    if (keyword) params.q = keyword;
+    const res = await api.get('/api/famic/crops', { params });
+    return res.data;
+  },
+  /**
+   * FAMIC作物名をマスタ作物として追加（管理者のみ）
+   * @param {string} name - 作物名
+   * @returns {Promise<{status: string, id: number, name: string}>}
+   */
+  addCropFromFamic: async (name) => {
+    const res = await api.post('/api/crops/from-famic', null, { params: { name } });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -529,6 +550,10 @@ export const adminApi = {
   },
   setFamicAutoUpdate: async (enabled) => {
     const res = await api.put('/api/admin/famic/auto-update', null, { params: { enabled } });
+    return res.data;
+  },
+  acceptFamicTerms: async () => {
+    const res = await api.post('/api/admin/famic/accept-terms');
     return res.data;
   },
 };

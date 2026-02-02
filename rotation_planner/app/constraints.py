@@ -13,9 +13,10 @@ from dataclasses import dataclass, field
 # =============================================================================
 
 # ハードコードのフォールバック値（DB接続できない場合に使用）
+# FAMIC表記に準拠
 _FALLBACK_CROPS = [
-    "春小麦", "秋小麦", "大豆", "デントコーン", "WCS",
-    "てんさい", "馬鈴薯", "キャベツ", "にんじん", "だいこん"
+    "小麦(春播)", "小麦(秋播)", "だいず", "デントコーン", "WCS",
+    "てんさい", "ばれいしょ", "キャベツ", "にんじん", "だいこん"
 ]
 
 
@@ -64,30 +65,31 @@ def get_default_crops(user_id: int = None) -> List[str]:
 # 後方互換性のため、デフォルト値も維持（モジュール読み込み時に評価）
 DEFAULT_CROPS = get_default_crops()
 
+# FAMIC表記に準拠
 DEFAULT_CONSTRAINTS = {
-    "春小麦":     {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "秋小麦":     {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
-    "大豆":       {"min_ha": None, "cap_ha": 12, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
+    "小麦(春播)": {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
+    "小麦(秋播)": {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
+    "だいず":     {"min_ha": None, "cap_ha": 12, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "デントコーン": {"min_ha": None, "cap_ha": 8, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "WCS":        {"min_ha": None, "cap_ha": 4, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "てんさい":   {"min_ha": None, "cap_ha": None, "min_gap_years": 4, "min_fields": 0, "max_fields": 2},
-    "馬鈴薯":     {"min_ha": None, "cap_ha": None, "min_gap_years": 4, "min_fields": 0, "max_fields": None},
+    "ばれいしょ": {"min_ha": None, "cap_ha": None, "min_gap_years": 4, "min_fields": 0, "max_fields": None},
     "キャベツ":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "にんじん":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
     "だいこん":   {"min_ha": None, "cap_ha": 10, "min_gap_years": 0, "min_fields": 0, "max_fields": None},
 }
 
-# 固定の禁止遷移
+# 固定の禁止遷移（FAMIC表記）
 FIXED_FORBIDDEN_TRANSITIONS = [
-    ("てんさい", "秋小麦"),  # 作期重複
-    ("春小麦", "秋小麦"),    # 病害対策
+    ("てんさい", "小麦(秋播)"),  # 作期重複
+    ("小麦(春播)", "小麦(秋播)"),    # 病害対策
 ]
 
-# デフォルトの優先遷移
-DEFAULT_PREFERRED_TRANSITIONS = "てんさい->大豆:10, てんさい->春小麦:5, デントコーン->秋小麦:8"
+# デフォルトの優先遷移（FAMIC表記）
+DEFAULT_PREFERRED_TRANSITIONS = "てんさい->だいず:10, てんさい->小麦(春播):5, デントコーン->小麦(秋播):8"
 
-# 主作物（面積変動を抑えたい）
-DEFAULT_MAIN_CROPS = "春小麦, 秋小麦, 大豆"
+# 主作物（面積変動を抑えたい）（FAMIC表記）
+DEFAULT_MAIN_CROPS = "小麦(春播), 小麦(秋播), だいず"
 
 
 # =============================================================================

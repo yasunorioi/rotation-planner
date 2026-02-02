@@ -42,9 +42,8 @@ export default function FieldRegister() {
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState(null);
 
-  // フォーム状態
+  // フォーム状態（ほ場IDは自動生成のため不要）
   const [formData, setFormData] = useState({
-    field_code: '',
     field_name: '',
     district: '',
     beet_forbidden: false,
@@ -127,7 +126,6 @@ export default function FieldRegister() {
   const handleFieldClick = useCallback((field) => {
     setSelectedField(field);
     setFormData({
-      field_code: field.field_code,
       field_name: field.field_name || '',
       district: field.district || '',
       beet_forbidden: field.beet_forbidden || false,
@@ -229,14 +227,21 @@ export default function FieldRegister() {
     }
   };
 
+  // ほ場ID自動生成
+  const generateFieldCode = () => {
+    const existingIds = new Set(fields.map((f) => f.field_code));
+    let num = fields.length + 1;
+    let fieldCode = `F${String(num).padStart(3, '0')}`;
+    while (existingIds.has(fieldCode)) {
+      num++;
+      fieldCode = `F${String(num).padStart(3, '0')}`;
+    }
+    return fieldCode;
+  };
+
   // ほ場登録
   const handleRegister = async (e) => {
     e.preventDefault();
-
-    if (!formData.field_code.trim()) {
-      setMessage({ type: 'error', text: 'ほ場IDを入力してください' });
-      return;
-    }
 
     if (!drawnCoords || drawnCoords.length < 3) {
       setMessage({ type: 'error', text: '地図上でポリゴンを描画してください' });
@@ -244,8 +249,11 @@ export default function FieldRegister() {
     }
 
     try {
+      // ほ場IDを自動生成
+      const fieldCode = generateFieldCode();
+
       const createData = {
-        field_code: formData.field_code.trim(),
+        field_code: fieldCode,
         field_name: formData.field_name.trim() || null,
         district: formData.district.trim() || null,
         area_ha: drawnArea / 10000,
@@ -262,8 +270,8 @@ export default function FieldRegister() {
       await fieldApi.create(createData);
 
       const cropMsg = formData.crop_name ? `（${formData.crop_name}）` : '';
-      setMessage({ type: 'success', text: `ほ場「${formData.field_code}」${cropMsg}を登録しました` });
-      setFormData({ field_code: '', field_name: '', district: '', beet_forbidden: false, crop_year: '', crop_name: '' });
+      setMessage({ type: 'success', text: `ほ場「${fieldCode}」${cropMsg}を登録しました` });
+      setFormData({ field_name: '', district: '', beet_forbidden: false, crop_year: '', crop_name: '' });
       setDrawnCoords(null);
       setDrawnArea(0);
 
@@ -762,18 +770,8 @@ export default function FieldRegister() {
         <div className="form-section">
           {/* 登録フォーム */}
           <div className="form-card">
-            <h3>📝 ほ場情報</h3>
+            <h3>ほ場情報</h3>
             <form onSubmit={handleRegister}>
-              <div className="form-group">
-                <label>ほ場ID *</label>
-                <input
-                  type="text"
-                  value={formData.field_code}
-                  onChange={(e) => setFormData({ ...formData, field_code: e.target.value })}
-                  placeholder="例: F001"
-                  required
-                />
-              </div>
               <div className="form-group">
                 <label>ほ場名</label>
                 <input

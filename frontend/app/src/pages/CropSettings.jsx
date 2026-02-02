@@ -10,10 +10,15 @@ export default function CropSettings() {
   const [allCrops, setAllCrops] = useState([]);
   const [userCrops, setUserCrops] = useState([]);
   const [selectedCropIds, setSelectedCropIds] = useState([]);
-  const [customNames, setCustomNames] = useState({});
+  const [customCrops, setCustomCrops] = useState([]); // カスタム作物リスト
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(null);
+
+  // カスタム作物追加用
+  const [newCustomParentId, setNewCustomParentId] = useState('');
+  const [newCustomName, setNewCustomName] = useState('');
+  const [isAddingCustom, setIsAddingCustom] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -28,17 +33,23 @@ export default function CropSettings() {
       ]);
       setAllCrops(crops);
       setUserCrops(userCropsData);
-      setSelectedCropIds(userCropsData.map((uc) => uc.crop_id));
 
-      const names = {};
+      // マスタ作物（custom_name がない）とカスタム作物を分離
+      const masterCropIds = [];
+      const customList = [];
       userCropsData.forEach((uc) => {
         if (uc.custom_name) {
-          names[uc.crop_id] = uc.custom_name;
+          customList.push(uc);
+        } else {
+          masterCropIds.push(uc.parent_crop_id);
         }
       });
-      setCustomNames(names);
+      setSelectedCropIds(masterCropIds);
+      setCustomCrops(customList);
     } catch (err) {
-      setMessage({ type: 'error', text: '読み込みに失敗しました' });
+      console.error('CropSettings load error:', err);
+      const detail = err.response?.data?.detail || err.message || '不明なエラー';
+      setMessage({ type: 'error', text: `読み込みに失敗しました: ${detail}` });
     } finally {
       setIsLoading(false);
     }
@@ -58,30 +69,56 @@ export default function CropSettings() {
     setSelectedCropIds([]);
   };
 
-  const handleCustomNameChange = (cropId, value) => {
-    setCustomNames((prev) => ({
-      ...prev,
-      [cropId]: value,
-    }));
-  };
-
   const handleSave = async () => {
     setIsSaving(true);
     setMessage(null);
     try {
       await cropApi.updateUserCrops(selectedCropIds);
-
-      for (const cropId of selectedCropIds) {
-        const customName = customNames[cropId] || '';
-        await cropApi.setCustomName(cropId, customName);
-      }
-
       setMessage({ type: 'success', text: '保存しました' });
       await loadData();
     } catch (err) {
       setMessage({ type: 'error', text: '保存に失敗しました' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // カスタム作物追加
+  const handleAddCustomCrop = async () => {
+    if (!newCustomParentId) {
+      setMessage({ type: 'error', text: '親作物を選択してください' });
+      return;
+    }
+    if (!newCustomName.trim()) {
+      setMessage({ type: 'error', text: 'カスタム名を入力してください' });
+      return;
+    }
+    setIsAddingCustom(true);
+    setMessage(null);
+    try {
+      await cropApi.addCustomCrop(parseInt(newCustomParentId), newCustomName.trim());
+      setMessage({ type: 'success', text: `「${newCustomName}」を追加しました` });
+      setNewCustomParentId('');
+      setNewCustomName('');
+      await loadData();
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || '不明なエラー';
+      setMessage({ type: 'error', text: `追加に失敗しました: ${detail}` });
+    } finally {
+      setIsAddingCustom(false);
+    }
+  };
+
+  // カスタム作物削除
+  const handleDeleteCustomCrop = async (userCropId) => {
+    if (!window.confirm('このカスタム作物を削除しますか？')) return;
+    setMessage(null);
+    try {
+      await cropApi.deleteCustomCrop(userCropId);
+      setMessage({ type: 'success', text: '削除しました' });
+      await loadData();
+    } catch (err) {
+      setMessage({ type: 'error', text: '削除に失敗しました' });
     }
   };
 
@@ -129,16 +166,6 @@ export default function CropSettings() {
                 />
                 <span className="crop-name">{crop.name}</span>
               </label>
-              {isSelected && (
-                <div className="custom-name-input">
-                  <input
-                    type="text"
-                    placeholder="カスタム名（任意）"
-                    value={customNames[crop.id] || ''}
-                    onChange={(e) => handleCustomNameChange(crop.id, e.target.value)}
-                  />
-                </div>
-              )}
               {crop.category && (
                 <span className="crop-category">{crop.category}</span>
               )}
@@ -148,8 +175,75 @@ export default function CropSettings() {
       </div>
 
       <div className="selected-count">
-        選択中: {selectedCropIds.length} / {allCrops.length} 作物
+        選択中: {selectedCropIds.length + customCrops.length} / {allCrops.length} 作物（カスタム: {customCrops.length}）
       </div>
+
+      <hr style={{ margin: '30px 0' }} />
+
+      <h2>➕ カスタム作物の追加</h2>
+      <p style={{ color: '#666', marginBottom: '15px' }}>
+        同じ作物でも作期や回数で区別したい場合に使用します。例: 「ブロッコリー（2作目）」「キャベツ（春）」
+      </p>
+
+      <div className="custom-crop-form" style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <select
+          value={newCustomParentId}
+          onChange={(e) => setNewCustomParentId(e.target.value)}
+          style={{ padding: '8px', minWidth: '150px' }}
+        >
+          <option value="">親作物を選択</option>
+          {allCrops.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="カスタム名（例: ブロッコリー（2作目））"
+          value={newCustomName}
+          onChange={(e) => setNewCustomName(e.target.value)}
+          style={{ padding: '8px', flex: 1, minWidth: '200px' }}
+        />
+        <button
+          onClick={handleAddCustomCrop}
+          disabled={isAddingCustom}
+          className="btn-primary"
+          style={{ padding: '8px 16px' }}
+        >
+          {isAddingCustom ? '追加中...' : '追加'}
+        </button>
+      </div>
+
+      {customCrops.length > 0 && (
+        <div className="custom-crops-list">
+          <h3>登録済みカスタム作物</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+            <thead>
+              <tr style={{ background: '#f5f5f5' }}>
+                <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>カスタム名</th>
+                <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>親作物</th>
+                <th style={{ padding: '10px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '80px' }}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customCrops.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{c.name}</td>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{c.parent_name}</td>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                    <button
+                      onClick={() => handleDeleteCustomCrop(c.id)}
+                      className="btn-danger"
+                      style={{ padding: '4px 8px', fontSize: '12px' }}
+                    >
+                      削除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

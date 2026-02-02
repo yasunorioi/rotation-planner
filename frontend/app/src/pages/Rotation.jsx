@@ -2,10 +2,11 @@
  * 輪作計画ページ
  */
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useFieldStore } from '../store/fieldStore';
-import { fieldApi, constraintApi, planApi, cropApi } from '../lib/api';
+import { fieldApi, constraintApi, planApi, cropApi, rotationApi } from '../lib/api';
 import { RotationSolver, createDefaultConstraints, generateResultTables } from '../lib/rotationSolver';
+import ConstraintEditor from '../components/ConstraintEditor';
 
 const DEFAULT_CROPS = ['春小麦', '秋小麦', '大豆', 'デントコーン', 'てんさい', '馬鈴薯'];
 
@@ -19,6 +20,12 @@ export default function Rotation() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [error, setError] = useState(null);
   const [saveName, setSaveName] = useState('');
+  const [solverType, setSolverType] = useState('js'); // 'js' or 'ortools'
+
+  // 輪作計画オプション
+  const [inferUnknown, setInferUnknown] = useState(false);
+  const [tensaiRequired, setTensaiRequired] = useState(false);
+  const [unknownMode, setUnknownMode] = useState('ignore'); // 'ignore' or 'safe'
 
   // 過去年を計算（現在の令和年から過去2年）
   const currentReiwaYear = new Date().getFullYear() - 2018;
@@ -56,14 +63,14 @@ export default function Rotation() {
     }
   };
 
-  const loadConstraints = async () => {
+  const loadConstraints = useCallback(async () => {
     try {
       const data = await constraintApi.get();
       setConstraints(data);
     } catch {
       setConstraints(null);
     }
-  };
+  }, []);
 
   const loadHistories = async () => {
     const histories = {};
@@ -145,6 +152,83 @@ export default function Rotation() {
     return c;
   };
 
+  // 最適化実行（JSソルバー）
+  const runOptimizationJS = async () => {
+    const solverFields = prepareFields();
+    const solverConstraints = prepareConstraints();
+
+    const startTime = performance.now();
+
+    const solver = new RotationSolver(
+      solverFields,
+      pastYears,
+      futureYearsList,
+      crops,
+      solverConstraints
+    );
+
+    const { plan, score, errors } = solver.solve({ maxIterations: 2000 });
+    const { fieldTable, summaryTable } = generateResultTables(
+      solverFields,
+      pastYears,
+      futureYearsList,
+      plan,
+      crops
+    );
+
+    const elapsedMs = Math.round(performance.now() - startTime);
+
+    return {
+      plan,
+      score,
+      errors,
+      fieldTable,
+      summaryTable,
+      elapsedMs,
+      solverUsed: 'JS',
+    };
+  };
+
+  // 最適化実行（OR-Toolsサーバー）
+  const runOptimizationORTools = async () => {
+    const solverFields = prepareFields();
+
+    const requestData = {
+      fields: solverFields.map((f) => ({
+        field_id: f.fieldId,
+        field_code: f.fieldCode,
+        district: f.district,
+        area_ha: f.areaHa,
+        history: f.history,
+        beet_forbidden: f.beetForbidden,
+      })),
+      crops,
+      past_years: pastYears,
+      future_years: futureYearsList,
+      constraints: constraints || {},
+      options: {
+        timeout: 10,
+        high_precision: false,
+        district_grouping: true,
+        infer_unknown: inferUnknown,
+        tensai_required: tensaiRequired,
+        unknown_mode: unknownMode,
+      },
+    };
+
+    const response = await rotationApi.optimize(requestData);
+
+    return {
+      plan: response.plan,
+      score: response.score,
+      errors: response.errors,
+      fieldTable: response.field_table,
+      summaryTable: response.summary_table,
+      elapsedMs: response.elapsed_ms,
+      solverUsed: 'OR-Tools',
+    };
+  };
+
   // 最適化実行
   const runOptimization = async () => {
     if (fields.length === 0) {
@@ -156,38 +240,13 @@ export default function Rotation() {
     setError(null);
 
     try {
-      const solverFields = prepareFields();
-      const solverConstraints = prepareConstraints();
-
-      const startTime = performance.now();
-
-      const solver = new RotationSolver(
-        solverFields,
-        pastYears,
-        futureYearsList,
-        crops,
-        solverConstraints
-      );
-
-      const { plan, score, errors } = solver.solve({ maxIterations: 2000 });
-      const { fieldTable, summaryTable } = generateResultTables(
-        solverFields,
-        pastYears,
-        futureYearsList,
-        plan,
-        crops
-      );
-
-      const elapsedMs = Math.round(performance.now() - startTime);
-
-      setResult({
-        plan,
-        score,
-        errors,
-        fieldTable,
-        summaryTable,
-        elapsedMs,
-      });
+      let resultData;
+      if (solverType === 'ortools') {
+        resultData = await runOptimizationORTools();
+      } else {
+        resultData = await runOptimizationJS();
+      }
+      setResult(resultData);
     } catch (err) {
       setError(err.message || '計算エラーが発生しました');
     } finally {
@@ -228,6 +287,39 @@ export default function Rotation() {
     }
   };
 
+  // CSVダウンロード（保存せずに直接）
+  const downloadCsv = () => {
+    if (!result || !result.fieldTable) return;
+
+    // ヘッダー行
+    const headers = ['コード', '地区', '面積(ha)', ...allYears];
+    const csvRows = [headers.join(',')];
+
+    // データ行
+    for (const row of result.fieldTable) {
+      const values = [
+        row.field_code,
+        row.district || '',
+        row.area_ha.toFixed(1),
+        ...allYears.map((y) => row[y] || ''),
+      ];
+      csvRows.push(values.map((v) => `"${v}"`).join(','));
+    }
+
+    // ダウンロード
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `輪作計画_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
   const allYears = [...pastYears, ...futureYearsList];
 
   return (
@@ -245,6 +337,59 @@ export default function Rotation() {
           </select>
         </div>
 
+        <div className="setting-group">
+          <label>ソルバー</label>
+          <select value={solverType} onChange={(e) => setSolverType(e.target.value)}>
+            <option value="js">JS（ブラウザ）</option>
+            <option value="ortools">OR-Tools（サーバー）</option>
+          </select>
+        </div>
+
+        <div className="setting-group">
+          <label>空欄の扱い</label>
+          <div className="radio-group">
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="unknownMode"
+                value="ignore"
+                checked={unknownMode === 'ignore'}
+                onChange={(e) => setUnknownMode(e.target.value)}
+              />
+              制約なし
+            </label>
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="unknownMode"
+                value="safe"
+                checked={unknownMode === 'safe'}
+                onChange={(e) => setUnknownMode(e.target.value)}
+              />
+              安全側
+            </label>
+          </div>
+        </div>
+
+        <div className="setting-group checkbox-group">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={inferUnknown}
+              onChange={(e) => setInferUnknown(e.target.checked)}
+            />
+            空欄を推論で補完
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={tensaiRequired}
+              onChange={(e) => setTensaiRequired(e.target.checked)}
+            />
+            てんさい必須
+          </label>
+        </div>
+
         <button
           onClick={runOptimization}
           disabled={isCalculating || fieldsLoading || fields.length === 0}
@@ -254,6 +399,8 @@ export default function Rotation() {
         </button>
       </div>
 
+      <ConstraintEditor crops={crops} onSave={loadConstraints} />
+
       {error && <div className="error-message">{error}</div>}
 
       {result && (
@@ -261,7 +408,9 @@ export default function Rotation() {
           <div className="result-header">
             <div className="score">
               スコア: {result.score.toFixed(1)}
-              <span className="elapsed">({result.elapsedMs}ms)</span>
+              <span className="elapsed">
+                ({result.elapsedMs}ms / {result.solverUsed || 'JS'})
+              </span>
             </div>
             <div className="save-form">
               <input
@@ -272,6 +421,9 @@ export default function Rotation() {
               />
               <button onClick={savePlan} className="btn-secondary">
                 💾 保存
+              </button>
+              <button onClick={downloadCsv} className="btn-secondary">
+                📥 CSV
               </button>
             </div>
           </div>

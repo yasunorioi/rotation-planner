@@ -838,7 +838,7 @@ def _load_debug_mode() -> bool:
             with open(settings_file, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
                 return settings.get("debug_mode", False)
-        except:
+        except (json.JSONDecodeError, OSError):
             pass
 
     # 3. デフォルトは OFF（本番向け）

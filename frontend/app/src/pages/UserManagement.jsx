@@ -18,6 +18,7 @@ export default function UserManagement() {
     role: 'farmer',
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
     if (user?.role === 'admin') {
@@ -100,6 +101,42 @@ export default function UserManagement() {
     }
   };
 
+  const handleResetPassword = async (username) => {
+    const newPassword = prompt(`ユーザー "${username}" の新しいパスワードを入力してください：`);
+    if (!newPassword) return;
+    if (newPassword.length < 4) {
+      alert('パスワードは4文字以上で入力してください');
+      return;
+    }
+    try {
+      await adminApi.updateUser(username, { password: newPassword });
+      alert(`ユーザー "${username}" のパスワードをリセットしました`);
+    } catch (err) {
+      alert('パスワードリセットに失敗しました');
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    setIsDownloading(true);
+    try {
+      const { blob, filename } = await adminApi.downloadBackup();
+      // ダウンロードリンクを作成
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Backup download failed:', err);
+      alert('バックアップのダウンロードに失敗しました');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   if (user?.role !== 'admin') {
     return (
       <div className="user-management-page">
@@ -115,9 +152,18 @@ export default function UserManagement() {
     <div className="user-management-page">
       <div className="page-header">
         <h1>👥 ユーザー管理</h1>
-        <button onClick={() => setShowForm(true)} className="btn-primary">
-          + 新規ユーザー
-        </button>
+        <div className="header-actions">
+          <button
+            onClick={handleDownloadBackup}
+            disabled={isDownloading}
+            className="btn-secondary"
+          >
+            {isDownloading ? '⏳ ダウンロード中...' : '💾 DBバックアップ'}
+          </button>
+          <button onClick={() => setShowForm(true)} className="btn-primary">
+            + 新規ユーザー
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -160,6 +206,7 @@ export default function UserManagement() {
                   required
                 >
                   <option value="farmer">農家</option>
+                  <option value="ja_staff">JA職員</option>
                   <option value="admin">管理者</option>
                 </select>
               </div>
@@ -197,17 +244,26 @@ export default function UserManagement() {
                 <td>{u.display_name || '-'}</td>
                 <td>
                   <span className={`role-badge ${u.role}`}>
-                    {u.role === 'admin' ? '管理者' : '農家'}
+                    {u.role === 'admin' ? '管理者' : u.role === 'ja_staff' ? 'JA職員' : '農家'}
                   </span>
                 </td>
                 <td>
-                  <button onClick={() => handleEdit(u)} className="btn-icon">
+                  <button onClick={() => handleEdit(u)} className="btn-icon" title="編集">
                     ✏️
                   </button>
                   {u.username !== user?.username && (
-                    <button onClick={() => handleDelete(u.username)} className="btn-icon btn-danger">
-                      🗑️
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleResetPassword(u.username)}
+                        className="btn-icon"
+                        title="パスワードリセット"
+                      >
+                        🔑
+                      </button>
+                      <button onClick={() => handleDelete(u.username)} className="btn-icon btn-danger" title="削除">
+                        🗑️
+                      </button>
+                    </>
                   )}
                 </td>
               </tr>

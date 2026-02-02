@@ -11,10 +11,18 @@ FAMICの農薬登録情報XLSファイルをSQLiteにインポート。
 - 登録適用部一.xls / 登録適用部二.xls: 適用作物・使用基準
 """
 
+import io
+import json
 import os
+import shutil
 import sqlite3
-from datetime import datetime
-from typing import Dict, Optional
+import tempfile
+import zipfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.request import urlopen
+from urllib.error import URLError
 
 import xlrd
 
@@ -28,6 +36,23 @@ DEFAULT_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "data", "rotation_planner.db"
 )
+
+# 設定ファイルパス
+SETTINGS_FILE = Path(DEFAULT_DB_PATH).parent / "settings.json"
+
+# FAMICデータキャッシュディレクトリ
+FAMIC_CACHE_DIR = Path(DEFAULT_DB_PATH).parent / "famic"
+
+# FAMICデータダウンロードURL
+FAMIC_BASE_URL = "https://www.acis.famic.go.jp/ddata/data"
+FAMIC_FILES = {
+    "basic": "登録基本部.zip",
+    "usage1": "登録適用部一.zip",
+    "usage2": "登録適用部二.zip",
+}
+
+# 自動更新間隔（日数）
+AUTO_UPDATE_INTERVAL_DAYS = 180  # 約半年
 
 
 # =============================================================================
@@ -310,3 +335,226 @@ def get_import_stats(db_path: str = None) -> Dict:
         "last_basic_import": last_basic,
         "last_usage_import": last_usage,
     }
+
+
+# =============================================================================
+# 設定管理
+# =============================================================================
+
+def _load_settings() -> Dict[str, Any]:
+    """設定ファイルを読み込む"""
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings(settings: Dict[str, Any]) -> None:
+    """設定ファイルを保存"""
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
+def get_famic_settings() -> Dict[str, Any]:
+    """
+    FAMIC自動更新設定を取得
+
+    Returns:
+        {
+            "auto_update_enabled": bool,
+            "last_update": str or None (ISO 8601),
+            "next_update": str or None (ISO 8601),
+        }
+    """
+    settings = _load_settings()
+    famic = settings.get("famic", {})
+
+    auto_update = famic.get("auto_update_enabled", False)
+    last_update = famic.get("last_update")
+    next_update = None
+
+    if last_update and auto_update:
+        try:
+            last_dt = datetime.fromisoformat(last_update)
+            next_dt = last_dt + timedelta(days=AUTO_UPDATE_INTERVAL_DAYS)
+            next_update = next_dt.isoformat()
+        except Exception:
+            pass
+
+    return {
+        "auto_update_enabled": auto_update,
+        "last_update": last_update,
+        "next_update": next_update,
+    }
+
+
+def set_famic_settings(auto_update_enabled: bool) -> None:
+    """
+    FAMIC自動更新設定を保存
+
+    Args:
+        auto_update_enabled: 自動更新を有効にするか
+    """
+    settings = _load_settings()
+    if "famic" not in settings:
+        settings["famic"] = {}
+
+    settings["famic"]["auto_update_enabled"] = auto_update_enabled
+    _save_settings(settings)
+
+
+def _update_last_update_time() -> None:
+    """最終更新日時を現在時刻に更新"""
+    settings = _load_settings()
+    if "famic" not in settings:
+        settings["famic"] = {}
+
+    settings["famic"]["last_update"] = datetime.now().isoformat()
+    _save_settings(settings)
+
+
+# =============================================================================
+# ダウンロード・自動更新
+# =============================================================================
+
+def download_famic_file(file_key: str, timeout: int = 60) -> str:
+    """
+    FAMICからZIPファイルをダウンロードして解凍
+
+    Args:
+        file_key: 'basic', 'usage1', or 'usage2'
+        timeout: ダウンロードタイムアウト秒数
+
+    Returns:
+        解凍されたXLSファイルのパス
+
+    Raises:
+        ValueError: 不正なfile_key
+        URLError: ダウンロード失敗
+        zipfile.BadZipFile: ZIPファイル破損
+    """
+    if file_key not in FAMIC_FILES:
+        raise ValueError(f"不正なfile_key: {file_key}")
+
+    zip_name = FAMIC_FILES[file_key]
+    url = f"{FAMIC_BASE_URL}/{zip_name}"
+
+    # キャッシュディレクトリ作成
+    FAMIC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ダウンロード
+    with urlopen(url, timeout=timeout) as response:
+        zip_data = response.read()
+
+    # ZIPを解凍
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+        # XLSファイルを探す
+        xls_files = [n for n in zf.namelist() if n.endswith('.xls')]
+        if not xls_files:
+            raise ValueError(f"ZIPにXLSファイルが含まれていません: {zip_name}")
+
+        # 最初のXLSを解凍
+        xls_name = xls_files[0]
+        xls_path = FAMIC_CACHE_DIR / xls_name
+
+        with zf.open(xls_name) as src:
+            with open(xls_path, 'wb') as dst:
+                dst.write(src.read())
+
+    return str(xls_path)
+
+
+def download_and_import_all(db_path: str = None, timeout: int = 120) -> Dict[str, Any]:
+    """
+    FAMICから全データをダウンロードしてインポート
+
+    Args:
+        db_path: DBファイルパス（省略時はデフォルト）
+        timeout: ダウンロードタイムアウト秒数
+
+    Returns:
+        {
+            "success": bool,
+            "basic_count": int,
+            "usage_count": int,
+            "error": str or None,
+        }
+    """
+    result = {
+        "success": False,
+        "basic_count": 0,
+        "usage_count": 0,
+        "error": None,
+    }
+
+    try:
+        # 登録基本部をダウンロード・インポート
+        basic_xls = download_famic_file("basic", timeout)
+        result["basic_count"] = import_famic_basic(basic_xls, db_path)
+
+        # 登録適用部一をダウンロード・インポート
+        usage1_xls = download_famic_file("usage1", timeout)
+        usage1_count = import_famic_usage(usage1_xls, db_path)
+
+        # 登録適用部二をダウンロード・インポート
+        usage2_xls = download_famic_file("usage2", timeout)
+        usage2_count = import_famic_usage(usage2_xls, db_path)
+
+        result["usage_count"] = usage1_count + usage2_count
+
+        # 最終更新日時を記録
+        _update_last_update_time()
+
+        result["success"] = True
+
+    except URLError as e:
+        result["error"] = f"ダウンロード失敗: {str(e)}"
+    except zipfile.BadZipFile as e:
+        result["error"] = f"ZIPファイル破損: {str(e)}"
+    except Exception as e:
+        result["error"] = f"エラー: {str(e)}"
+
+    return result
+
+
+def check_and_update_if_needed(db_path: str = None) -> Optional[Dict[str, Any]]:
+    """
+    自動更新が必要かチェックし、必要なら更新を実行
+
+    自動更新が有効で、前回更新から半年以上経過している場合に更新を実行。
+
+    Args:
+        db_path: DBファイルパス
+
+    Returns:
+        更新を実行した場合は download_and_import_all() の結果、
+        更新不要または自動更新無効の場合は None
+    """
+    famic_settings = get_famic_settings()
+
+    # 自動更新が無効なら何もしない
+    if not famic_settings["auto_update_enabled"]:
+        return None
+
+    last_update = famic_settings["last_update"]
+
+    # 一度も更新されていない場合は更新
+    if not last_update:
+        return download_and_import_all(db_path)
+
+    # 前回更新からの経過日数をチェック
+    try:
+        last_dt = datetime.fromisoformat(last_update)
+        days_since = (datetime.now() - last_dt).days
+
+        if days_since >= AUTO_UPDATE_INTERVAL_DAYS:
+            return download_and_import_all(db_path)
+    except Exception:
+        # 日付パースエラー時は更新を実行
+        return download_and_import_all(db_path)
+
+    return None

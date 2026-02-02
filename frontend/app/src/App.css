@@ -286,6 +286,111 @@ button {
   margin-top: 4px;
 }
 
+/* ワークフローセクション */
+.workflow-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.workflow-section h2 {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
+
+.workflow-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.workflow-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  min-width: 120px;
+}
+
+.workflow-step .step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--primary);
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.workflow-step .step-icon {
+  font-size: 32px;
+  margin: 8px 0;
+}
+
+.workflow-step .step-text {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.workflow-step .step-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.workflow-arrow {
+  font-size: 24px;
+  color: var(--text-muted);
+}
+
+/* 作付状況セクション */
+.crops-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.crops-section h2 {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
+
+.crops-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.crop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+}
+
+.crop-item .crop-name {
+  font-weight: 500;
+}
+
+.crop-item .crop-area {
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .quick-links h2 {
   margin-bottom: 16px;
 }
@@ -1289,4 +1394,304 @@ button {
   .field-map {
     height: 400px;
   }
+}
+
+/* =============================================================================
+   制約エディタ
+============================================================================= */
+
+.constraint-editor {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+}
+
+.constraint-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.constraint-header:hover {
+  background: var(--bg);
+}
+
+.constraint-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+}
+
+.expand-icon {
+  display: inline-block;
+  transition: transform 0.2s;
+  font-size: 12px;
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.constraint-header .hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.constraint-content {
+  border-top: 1px solid var(--border);
+  padding: 20px;
+}
+
+.constraint-section {
+  margin-bottom: 24px;
+}
+
+.constraint-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.constraint-table input[type="number"] {
+  width: 80px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: right;
+}
+
+.constraint-table input[type="number"]:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.constraint-table .crop-name {
+  font-weight: 500;
+}
+
+.constraint-content .form-group {
+  margin-bottom: 16px;
+}
+
+.constraint-content .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.constraint-content .form-group input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.constraint-content .form-group input[type="text"]:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.constraint-content .help-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.constraint-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.constraint-content .message {
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+.constraint-content .message.success {
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.constraint-content .message.error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+}
+
+/* =============================================================================
+   システム情報ページ
+============================================================================= */
+
+.system-info-page .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.system-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.info-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.info-card.wide {
+  grid-column: 1 / -1;
+}
+
+.info-card h3 {
+  font-size: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.info-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+}
+
+.info-card dt {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.info-card dd {
+  margin: 0;
+}
+
+.info-card .btn-primary {
+  margin-top: 16px;
+}
+
+.info-card .btn-small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.info-card .data-table.compact {
+  font-size: 13px;
+}
+
+.info-card .data-table.compact th,
+.info-card .data-table.compact td {
+  padding: 8px 12px;
+}
+
+.info-card .data-table td.number {
+  text-align: right;
+  font-family: monospace;
+}
+
+/* =============================================================================
+   輪作計画オプション
+============================================================================= */
+
+.settings-panel .radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.settings-panel .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.settings-panel .radio-label input[type="radio"] {
+  margin: 0;
+}
+
+.settings-panel .checkbox-group {
+  display: flex;
+  gap: 20px;
+}
+
+.settings-panel .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.settings-panel .checkbox-label input[type="checkbox"] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+}
+
+/* =============================================================================
+   筆ポリゴン表示
+============================================================================= */
+
+.fude-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+
+.fude-toggle .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.fude-toggle .fude-count {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.fude-toggle .btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* =============================================================================
+   ほ場一覧 選択スタイル
+============================================================================= */
+
+.fields-page .data-table tr.selected {
+  background-color: #eff6ff;
+}
+
+.fields-page .data-table th:first-child,
+.fields-page .data-table td:first-child {
+  text-align: center;
+}
+
+.fields-page .header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }

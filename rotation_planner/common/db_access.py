@@ -297,6 +297,24 @@ class CropHistoryRepository:
             return rows_to_list(cursor.fetchall())
 
     @staticmethod
+    def get_history_by_id(history_id: int) -> Optional[Dict[str, Any]]:
+        """
+        履歴IDで作付履歴を取得
+
+        Args:
+            history_id: 履歴ID
+
+        Returns:
+            履歴データ（id, field_id, year, crop, is_inferred）、存在しなければNone
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM crop_history WHERE id = ?
+            """, (history_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
     def delete_history(field_id: int, year: str) -> bool:
         """
         特定ほ場・年度の履歴を削除
@@ -313,6 +331,23 @@ class CropHistoryRepository:
                 DELETE FROM crop_history
                 WHERE field_id = ? AND year = ?
             """, (field_id, year))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete_history_by_id(history_id: int) -> bool:
+        """
+        履歴IDで作付履歴を削除
+
+        Args:
+            history_id: 履歴ID
+
+        Returns:
+            削除成功ならTrue
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                DELETE FROM crop_history WHERE id = ?
+            """, (history_id,))
             return cursor.rowcount > 0
 
     @staticmethod
@@ -691,7 +726,7 @@ class JAStaffRepository:
                 if r.get('order_data_json'):
                     try:
                         r['order_data'] = json.loads(r['order_data_json'])
-                    except:
+                    except json.JSONDecodeError:
                         r['order_data'] = {}
                 else:
                     r['order_data'] = {}
@@ -738,7 +773,7 @@ class JAStaffRepository:
 
                 try:
                     order_data = json.loads(order_data_json)
-                except:
+                except json.JSONDecodeError:
                     continue
 
                 summary = order_data.get('summary', [])
@@ -982,6 +1017,67 @@ class PesticideMasterRepository:
 # =============================================================================
 # 作物マスタリポジトリ
 # =============================================================================
+
+def ensure_crop_tables():
+    """
+    crop_master と user_crops テーブルが存在しない場合は作成し、初期データを投入する
+    """
+    with get_db() as conn:
+        # crop_master テーブル
+        cursor = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='crop_master'
+        """)
+        if cursor.fetchone() is None:
+            conn.execute("""
+                CREATE TABLE crop_master (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    category TEXT,
+                    display_order INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # 初期データ投入
+            initial_crops = [
+                ('春小麦', '穀物', 1),
+                ('秋小麦', '穀物', 2),
+                ('大豆', '豆類', 3),
+                ('てんさい', '根菜', 4),
+                ('馬鈴薯', '根菜', 5),
+                ('小豆', '豆類', 6),
+                ('玉ねぎ', '野菜', 7),
+                ('にんじん', '野菜', 8),
+                ('かぼちゃ', '野菜', 9),
+                ('スイートコーン', '穀物', 10),
+            ]
+            for name, category, order in initial_crops:
+                conn.execute("""
+                    INSERT INTO crop_master (name, category, display_order)
+                    VALUES (?, ?, ?)
+                """, (name, category, order))
+
+        # user_crops テーブル
+        cursor = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='user_crops'
+        """)
+        if cursor.fetchone() is None:
+            conn.execute("""
+                CREATE TABLE user_crops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    parent_crop_id INTEGER NOT NULL,
+                    custom_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (parent_crop_id) REFERENCES crop_master(id),
+                    UNIQUE(user_id, parent_crop_id, custom_name)
+                )
+            """)
+
+        conn.commit()
+
 
 class CropMasterRepository:
     """作物マスタのCRUD操作（JA管理）"""

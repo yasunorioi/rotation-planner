@@ -21,11 +21,11 @@ export default function Layout() {
 
   const menuItems = [
     { path: '/', label: 'ホーム', icon: '🏠' },
+    { path: '/crops', label: '作物設定', icon: '🌱' },
     { path: '/fields', label: 'ほ場一覧', icon: '🗺️' },
     { path: '/field-register', label: 'ほ場登録', icon: '📍' },
     { path: '/rotation', label: '輪作計画', icon: '📊' },
     { path: '/plans', label: '保存済み計画', icon: '📁' },
-    { path: '/crops', label: '作物設定', icon: '🌱' },
     { path: '/pesticide-masters', label: '防除マスタ', icon: '💊' },
     { path: '/pesticide-orders', label: '農薬発注', icon: '📦' },
     { path: '/pesticide-records', label: '防除記録', icon: '📋' },
@@ -35,6 +35,7 @@ export default function Layout() {
   const adminMenuItems = [
     { path: '/ja', label: 'JA集計', icon: '🏛️' },
     { path: '/users', label: 'ユーザー管理', icon: '👥' },
+    { path: '/system', label: 'システム情報', icon: '⚙️' },
   ];
 
   return (

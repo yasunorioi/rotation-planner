@@ -1,5 +1,10 @@
 /**
  * JA集計ページ (管理者用)
+ *
+ * 機能:
+ * - 農家一覧と詳細表示
+ * - 農薬発注集計（サマリー/詳細）
+ * - 農家別・農薬別のフィルタリング
  */
 
 import { useEffect, useState } from 'react';
@@ -17,6 +22,12 @@ export default function JAAggregation() {
   const [activeTab, setActiveTab] = useState('farmers');
   const [isLoading, setIsLoading] = useState(true);
 
+  // 詳細集計用の状態
+  const [detailView, setDetailView] = useState('summary'); // summary, byFarmer, byPesticide
+  const [detailData, setDetailData] = useState([]);
+  const [sortField, setSortField] = useState('');
+  const [sortAsc, setSortAsc] = useState(true);
+
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
   useEffect(() => {
@@ -27,9 +38,13 @@ export default function JAAggregation() {
 
   useEffect(() => {
     if (activeTab === 'pesticides') {
-      loadPesticideAggregation();
+      if (detailView === 'summary') {
+        loadPesticideAggregation();
+      } else {
+        loadDetailAggregation();
+      }
     }
-  }, [selectedYear, activeTab]);
+  }, [selectedYear, activeTab, detailView]);
 
   const loadFarmers = async () => {
     setIsLoading(true);
@@ -68,6 +83,38 @@ export default function JAAggregation() {
       setIsLoading(false);
     }
   };
+
+  const loadDetailAggregation = async () => {
+    setIsLoading(true);
+    try {
+      const groupBy = detailView === 'byFarmer' ? 'farmer' : 'pesticide';
+      const data = await jaApi.aggregateDetail(selectedYear, groupBy);
+      setDetailData(data);
+    } catch (err) {
+      console.error('Failed to load detail aggregation:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  const sortedAggregation = [...pesticideAggregation].sort((a, b) => {
+    if (!sortField) return 0;
+    const aVal = a[sortField];
+    const bVal = b[sortField];
+    if (typeof aVal === 'number') {
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    return sortAsc ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+  });
 
   if (user?.role !== 'admin') {
     return (
@@ -217,33 +264,126 @@ export default function JAAggregation() {
                 <option key={y} value={y}>{y}年</option>
               ))}
             </select>
+
+            <div className="view-toggle">
+              <button
+                className={`toggle-btn ${detailView === 'summary' ? 'active' : ''}`}
+                onClick={() => setDetailView('summary')}
+              >
+                サマリー
+              </button>
+              <button
+                className={`toggle-btn ${detailView === 'byFarmer' ? 'active' : ''}`}
+                onClick={() => setDetailView('byFarmer')}
+              >
+                農家別
+              </button>
+              <button
+                className={`toggle-btn ${detailView === 'byPesticide' ? 'active' : ''}`}
+                onClick={() => setDetailView('byPesticide')}
+              >
+                農薬別
+              </button>
+            </div>
           </div>
 
           {isLoading ? (
             <p>読み込み中...</p>
-          ) : pesticideAggregation.length === 0 ? (
-            <p className="empty-message">{selectedYear}年の発注データがありません</p>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>農薬名</th>
-                  <th>合計数量</th>
-                  <th>単位</th>
-                  <th>発注者数</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pesticideAggregation.map((item, idx) => (
-                  <tr key={idx}>
-                    <td>{item.pesticide_name}</td>
-                    <td>{item.total_quantity}</td>
-                    <td>{item.unit}</td>
-                    <td>{item.order_count}人</td>
+          ) : detailView === 'summary' ? (
+            // サマリー表示
+            pesticideAggregation.length === 0 ? (
+              <p className="empty-message">{selectedYear}年の発注データがありません</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th onClick={() => handleSort('pesticide_name')} style={{ cursor: 'pointer' }}>
+                      農薬名 {sortField === 'pesticide_name' && (sortAsc ? '▲' : '▼')}
+                    </th>
+                    <th onClick={() => handleSort('total_quantity')} style={{ cursor: 'pointer' }}>
+                      合計数量 {sortField === 'total_quantity' && (sortAsc ? '▲' : '▼')}
+                    </th>
+                    <th>単位</th>
+                    <th>発注者数</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {sortedAggregation.map((item, idx) => (
+                    <tr key={idx}>
+                      <td>{item.pesticide_name}</td>
+                      <td>{item.total_quantity}</td>
+                      <td>{item.unit}</td>
+                      <td>{item.order_count || (item.farmers?.length || 0)}人</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : detailView === 'byFarmer' ? (
+            // 農家別詳細
+            detailData.length === 0 ? (
+              <p className="empty-message">{selectedYear}年の発注データがありません</p>
+            ) : (
+              <div className="farmer-detail-list">
+                {detailData.map((farmer, idx) => (
+                  <div key={idx} className="farmer-card">
+                    <h3>👤 {farmer.farmer_name}</h3>
+                    {farmer.pesticides.length === 0 ? (
+                      <p className="empty-message">発注なし</p>
+                    ) : (
+                      <table className="data-table compact">
+                        <thead>
+                          <tr>
+                            <th>農薬名</th>
+                            <th>数量</th>
+                            <th>単位</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {farmer.pesticides.map((p, pidx) => (
+                            <tr key={pidx}>
+                              <td>{p.pesticide_name}</td>
+                              <td>{p.quantity}</td>
+                              <td>{p.unit}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )
+          ) : (
+            // 農薬別詳細
+            detailData.length === 0 ? (
+              <p className="empty-message">{selectedYear}年の発注データがありません</p>
+            ) : (
+              <div className="pesticide-detail-list">
+                {detailData.map((pest, idx) => (
+                  <div key={idx} className="pesticide-card">
+                    <h3>💊 {pest.pesticide_name}</h3>
+                    <p className="total">合計: {pest.total_quantity} {pest.unit}</p>
+                    <table className="data-table compact">
+                      <thead>
+                        <tr>
+                          <th>農家</th>
+                          <th>数量</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pest.farmers.map((f, fidx) => (
+                          <tr key={fidx}>
+                            <td>{f.name}</td>
+                            <td>{f.quantity}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </div>
       )}

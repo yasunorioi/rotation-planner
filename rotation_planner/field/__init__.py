@@ -135,6 +135,15 @@ from .fude_polygon import (
     download_fude_geojson,
 )
 
+# GPSマッチングモジュール
+from .gps_matcher import (
+    SHAPELY_AVAILABLE,
+    MAX_DISTANCE_METERS,
+    find_field_by_gps,
+    get_field_candidates,
+    format_field_candidates_for_display,
+)
+
 # 公開API
 __all__ = [
     # KML/KMZパーサー
@@ -203,4 +212,10 @@ __all__ = [
     # ほ場一覧UI
     "create_field_list_ui",
     "get_fields_with_yearly_crops",
+    # GPSマッチング
+    "SHAPELY_AVAILABLE",
+    "MAX_DISTANCE_METERS",
+    "find_field_by_gps",
+    "get_field_candidates",
+    "format_field_candidates_for_display",
 ]

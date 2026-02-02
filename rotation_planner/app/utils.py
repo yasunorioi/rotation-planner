@@ -148,7 +148,7 @@ def load_csv(file_path: str, area_unit: str) -> Tuple[List[Field], List[str], st
     """CSVを読み込んでFieldリストを返す"""
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
-    except:
+    except UnicodeDecodeError:
         df = pd.read_csv(file_path, encoding='shift_jis')
 
     # 列名の正規化（空白除去）

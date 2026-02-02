@@ -36,6 +36,17 @@ api.interceptors.response.use(
 );
 
 // =============================================================================
+// ダッシュボード統計
+// =============================================================================
+
+export const dashboardApi = {
+  getStats: async () => {
+    const res = await api.get('/api/dashboard/stats');
+    return res.data;
+  },
+};
+
+// =============================================================================
 // 認証
 // =============================================================================
 
@@ -46,6 +57,17 @@ export const authApi = {
   },
   getMe: async () => {
     const res = await api.get('/api/auth/me');
+    return res.data;
+  },
+};
+
+// =============================================================================
+// GPSマッチング
+// =============================================================================
+
+export const gpsApi = {
+  matchField: async (lat, lon) => {
+    const res = await api.post('/api/gps/match-field', { lat, lon });
     return res.data;
   },
 };
@@ -83,6 +105,37 @@ export const fieldApi = {
     return res.data;
   },
   exportCsv: () => `${API_BASE}/api/export/fields/csv`,
+  importKml: async (formData) => {
+    const res = await api.post('/api/fields/import-kml', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
+};
+
+// =============================================================================
+// 筆ポリゴン
+// =============================================================================
+
+export const fudePolygonApi = {
+  /**
+   * 指定範囲内の筆ポリゴンを取得
+   * @param {Object} bounds - {min_lat, min_lng, max_lat, max_lng}
+   * @param {number} maxResults - 最大取得件数
+   */
+  getByBounds: async (bounds, maxResults = 200) => {
+    const params = {
+      min_lat: bounds.min_lat,
+      min_lng: bounds.min_lng,
+      max_lat: bounds.max_lat,
+      max_lng: bounds.max_lng,
+      max_results: maxResults,
+    };
+    const res = await api.get('/api/fude-polygon/geojson', { params });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -144,6 +197,16 @@ export const cropApi = {
     const res = await api.put('/api/user-crops/custom-name', { crop_id: cropId, custom_name: customName });
     return res.data;
   },
+  addCustomCrop: async (parentCropId, customName) => {
+    const res = await api.post('/api/user-crops/custom', {
+      parent_crop_id: parentCropId,
+      custom_name: customName,
+    });
+    return res.data;
+  },
+  deleteCustomCrop: async (userCropId) => {
+    await api.delete(`/api/user-crops/${userCropId}`);
+  },
 };
 
 // =============================================================================
@@ -167,6 +230,10 @@ export const pesticideMasterApi = {
   delete: async (id) => {
     await api.delete(`/api/pesticide-masters/${id}`);
   },
+  getDilutionRates: async (name) => {
+    const res = await api.get(`/api/pesticide-masters/by-name/${encodeURIComponent(name)}/dilution-rates`);
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -189,6 +256,21 @@ export const pesticideOrderApi = {
   },
   delete: async (id) => {
     await api.delete(`/api/pesticide-orders/${id}`);
+  },
+  calculateFromPlan: async (planId, year) => {
+    const res = await api.post('/api/pesticide-orders/calculate-from-plan', {
+      plan_id: planId,
+      year: year,
+    });
+    return res.data;
+  },
+  exportCsv: (year = null) => {
+    const params = year ? `?year=${year}` : '';
+    return `${api.defaults.baseURL}/api/pesticide-orders/export/csv${params}`;
+  },
+  exportPdf: (year = null) => {
+    const params = year ? `?year=${year}` : '';
+    return `${api.defaults.baseURL}/api/pesticide-orders/export/pdf${params}`;
   },
 };
 
@@ -220,6 +302,38 @@ export const pesticideRecordApi = {
     await api.delete(`/api/pesticide-records/${id}`);
   },
   exportCsv: (year = null) => `${API_BASE}/api/pesticide-records/export/csv${year ? `?year=${year}` : ''}`,
+  /**
+   * 画像から農薬名を解析（Claude Vision API）
+   * @param {File} imageFile - 画像ファイル
+   * @returns {Promise<{pesticide_name: string|null, confidence: number|null, raw_text: string|null, error: string|null}>}
+   */
+  analyzeImage: async (imageFile) => {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    const res = await api.post('/api/pesticide-records/analyze-image', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
+  // 画像保存・取得
+  uploadImage: async (recordId, imageFile) => {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    const res = await api.post(`/api/pesticide-records/${recordId}/images`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+  listImages: async (recordId) => {
+    const res = await api.get(`/api/pesticide-records/${recordId}/images`);
+    return res.data;
+  },
+  deleteImage: async (recordId, imageId) => {
+    await api.delete(`/api/pesticide-records/${recordId}/images/${imageId}`);
+  },
+  getImageUrl: (recordId, imageId) => `${API_BASE}/api/pesticide-records/${recordId}/images/${imageId}`,
 };
 
 // =============================================================================
@@ -243,6 +357,30 @@ export const jaApi = {
     const res = await api.get('/api/ja/aggregate/pesticide-orders', { params: { year } });
     return res.data;
   },
+  aggregateDetail: async (year, groupBy = 'farmer') => {
+    const res = await api.get('/api/ja/aggregate/pesticide-orders/detail', {
+      params: { year, group_by: groupBy },
+    });
+    return res.data;
+  },
+};
+
+// =============================================================================
+// 輪作計画最適化 (OR-Tools)
+// =============================================================================
+
+export const rotationApi = {
+  optimize: async (data) => {
+    const res = await api.post('/api/rotation/optimize', data);
+    return res.data;
+  },
+  importCsv: async (planName, csvData) => {
+    const res = await api.post('/api/rotation/import-csv', {
+      plan_name: planName,
+      csv_data: csvData,
+    });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -264,6 +402,67 @@ export const adminApi = {
   },
   deleteUser: async (username) => {
     await api.delete(`/api/admin/users/${username}`);
+  },
+  downloadBackup: async () => {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_BASE}/api/admin/backup`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error('Backup download failed');
+    }
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = 'rotation_planner_backup.db';
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="?([^"]+)"?/);
+      if (match) filename = match[1];
+    }
+    return { blob, filename };
+  },
+  getSystemInfo: async () => {
+    const res = await api.get('/api/admin/system-info');
+    return res.data;
+  },
+  // デバッグモード
+  getDebugMode: async () => {
+    const res = await api.get('/api/admin/settings/debug');
+    return res.data;
+  },
+  setDebugMode: async (enabled) => {
+    const res = await api.put('/api/admin/settings/debug', { enabled });
+    return res.data;
+  },
+  // 筆ポリゴン
+  listFudePolygons: async () => {
+    const res = await api.get('/api/admin/fude-polygon');
+    return res.data;
+  },
+  uploadFudePolygon: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/api/admin/fude-polygon', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+  deleteFudePolygon: async (filename) => {
+    await api.delete(`/api/admin/fude-polygon/${encodeURIComponent(filename)}`);
+  },
+  // FAMIC
+  getFamicStatus: async () => {
+    const res = await api.get('/api/admin/famic/status');
+    return res.data;
+  },
+  updateFamic: async () => {
+    const res = await api.post('/api/admin/famic/update');
+    return res.data;
+  },
+  setFamicAutoUpdate: async (enabled) => {
+    const res = await api.put('/api/admin/famic/auto-update', null, { params: { enabled } });
+    return res.data;
   },
 };
 

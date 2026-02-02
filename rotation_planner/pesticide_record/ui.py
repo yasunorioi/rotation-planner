@@ -28,6 +28,11 @@ from rotation_planner.common import (
     format_info,
 )
 from rotation_planner.pesticide_record.image_analyzer import analyze_image
+from rotation_planner.field.gps_matcher import (
+    get_field_candidates,
+    format_field_candidates_for_display,
+    SHAPELY_AVAILABLE,
+)
 
 
 # =============================================================================
@@ -131,7 +136,7 @@ def get_current_crop_for_field(field_id: int, user_id: int) -> Optional[str]:
 # UI操作関数
 # =============================================================================
 
-def on_image_upload(file_path: str, user_state: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
+def on_image_upload(file_path: str, user_state: Dict[str, Any]) -> Tuple[str, str, str, str, str, gr.Dropdown]:
     """
     画像アップロード時の処理
 
@@ -140,13 +145,17 @@ def on_image_upload(file_path: str, user_state: Dict[str, Any]) -> Tuple[str, st
         user_state: ユーザー状態
 
     Returns:
-        (spray_date, pesticide_name, analysis_info, dilution_choices_html, message)
+        (spray_date, pesticide_name, analysis_info, dilution_choices_html, message, field_dropdown)
     """
+    empty_dropdown = gr.Dropdown(choices=[], value=None)
+
     if not file_path:
-        return "", "", "", "", format_warning("画像を選択してください")
+        return "", "", "", "", format_warning("画像を選択してください"), empty_dropdown
 
     if not user_state or not user_state.get("user_id"):
-        return "", "", "", "", format_error("ログインが必要です")
+        return "", "", "", "", format_error("ログインが必要です"), empty_dropdown
+
+    user_id = user_state.get("user_id")
 
     # 画像を解析
     result = analyze_image(file_path)
@@ -165,11 +174,48 @@ def on_image_upload(file_path: str, user_state: Dict[str, Any]) -> Tuple[str, st
     else:
         info_parts.append("📅 撮影日時: 取得できませんでした（今日の日付を設定）")
 
+    # GPS座標からほ場候補を取得
+    field_dropdown_update = empty_dropdown
+    gps_matched_field_id = None
+
     if result.get("gps"):
         gps = result["gps"]
         info_parts.append(f"📍 GPS: {gps['lat']:.6f}, {gps['lon']:.6f}")
+
+        # ほ場一覧を取得してGPSマッチング
+        fields = FieldRepository.get_fields(user_id)
+        if fields and SHAPELY_AVAILABLE:
+            candidates = get_field_candidates(
+                gps_lat=gps["lat"],
+                gps_lon=gps["lon"],
+                fields=fields,
+                max_results=5
+            )
+
+            if candidates:
+                # 候補ほ場をドロップダウンに設定
+                dropdown_choices = format_field_candidates_for_display(candidates)
+
+                # 最初の候補を自動選択
+                first_candidate = candidates[0]
+                gps_matched_field_id = first_candidate.get("id")
+
+                if first_candidate.get("is_inside"):
+                    info_parts.append(f"🎯 ほ場を自動検出: {first_candidate.get('field_code', '')} {first_candidate.get('name', '')}")
+                else:
+                    distance_m = first_candidate.get("distance_m", 0)
+                    info_parts.append(f"📍 最寄りのほ場: {first_candidate.get('field_code', '')} ({int(distance_m)}m)")
+
+                field_dropdown_update = gr.Dropdown(
+                    choices=dropdown_choices,
+                    value=gps_matched_field_id
+                )
+            else:
+                info_parts.append("📍 近くのほ場が見つかりませんでした（手動で選択してください）")
+        elif not SHAPELY_AVAILABLE:
+            info_parts.append("📍 GPSマッチング: Shapelyライブラリが必要です")
     else:
-        info_parts.append("📍 GPS: 取得できませんでした")
+        info_parts.append("📍 GPS: 取得できませんでした（手動でほ場を選択してください）")
 
     if result.get("pesticide_name"):
         confidence = result.get("confidence", "")
@@ -193,7 +239,7 @@ def on_image_upload(file_path: str, user_state: Dict[str, Any]) -> Tuple[str, st
             if len(dilutions) > 10:
                 dilution_html += f" 他{len(dilutions) - 10}件"
 
-    return spray_date, pesticide_name, analysis_info, dilution_html, format_success("画像を解析しました")
+    return spray_date, pesticide_name, analysis_info, dilution_html, format_success("画像を解析しました"), field_dropdown_update
 
 
 def update_dilution_choices(pesticide_name: str, field_choice: str, user_state: Dict[str, Any]) -> gr.Dropdown:
@@ -691,7 +737,7 @@ def create_pesticide_record_ui(user_state: gr.State) -> Dict[str, Any]:
     image_upload.change(
         fn=on_image_upload,
         inputs=[image_upload, user_state],
-        outputs=[spray_date_input, pesticide_name_input, analysis_info, dilution_info, register_message]
+        outputs=[spray_date_input, pesticide_name_input, analysis_info, dilution_info, register_message, field_dropdown]
     )
 
     # 農薬名変更時に希釈倍率を更新

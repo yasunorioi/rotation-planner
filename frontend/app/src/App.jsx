@@ -13,6 +13,7 @@ import PesticideMasters from './pages/PesticideMasters';
 import DataManagement from './pages/DataManagement';
 import JAAggregation from './pages/JAAggregation';
 import UserManagement from './pages/UserManagement';
+import SystemInfo from './pages/SystemInfo';
 import FieldRegister from './pages/FieldRegister';
 import './App.css';
 
@@ -41,6 +42,7 @@ function App() {
           <Route path="data" element={<DataManagement />} />
           <Route path="ja" element={<JAAggregation />} />
           <Route path="users" element={<UserManagement />} />
+          <Route path="system" element={<SystemInfo />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

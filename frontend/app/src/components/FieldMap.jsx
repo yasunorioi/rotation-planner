@@ -6,8 +6,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw';
 import 'leaflet-draw/dist/leaflet.draw.css';
+
+// leaflet-draw は window.L を参照するため、グローバルに設定
+// これはモジュールのトップレベルで実行される
+window.L = L;
 
 // デフォルトマーカーアイコンの修正
 delete L.Icon.Default.prototype._getIconUrl;
@@ -26,112 +29,113 @@ export default function FieldMap({
   fields = [],
   onPolygonCreated,
   onFieldClick,
-  selectedFieldId = null
+  onFudePolygonClick,
+  selectedFieldId = null,
+  fudePolygons = [],
+  showFudePolygons = false,
 }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const drawnItemsRef = useRef(null);
   const existingFieldsRef = useRef(null);
+  const fudePolygonsRef = useRef(null);
   const [areaInfo, setAreaInfo] = useState(null);
 
   // 地図初期化
   useEffect(() => {
     if (mapInstanceRef.current) return;
 
-    const map = L.map(mapRef.current).setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
-    mapInstanceRef.current = map;
+    let map = null;
 
-    // ベースレイヤー
-    const esriSatellite = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { attribution: '&copy; Esri', maxZoom: 19 }
-    );
+    // leaflet-draw を動的にインポート（window.L が設定された後に読み込む）
+    const initMap = async () => {
+      // leaflet-draw は window.L を参照するため、動的インポートで読み込む
+      await import('leaflet-draw');
 
-    const gsiPhoto = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-      { attribution: '&copy; 国土地理院', maxZoom: 18 }
-    );
+      // コンポーネントがアンマウントされた場合は初期化しない
+      if (!mapRef.current) return;
 
-    const gsiStd = L.tileLayer(
-      'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-      { attribution: '&copy; 国土地理院', maxZoom: 18 }
-    );
+      map = L.map(mapRef.current).setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
+      mapInstanceRef.current = map;
 
-    const osm = L.tileLayer(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      { attribution: '&copy; OpenStreetMap', maxZoom: 19 }
-    );
+      // ベースレイヤー
+      const esriSatellite = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: '&copy; Esri', maxZoom: 19 }
+      );
 
-    esriSatellite.addTo(map);
+      const gsiPhoto = L.tileLayer(
+        'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+        { attribution: '&copy; 国土地理院', maxZoom: 18 }
+      );
 
-    L.control.layers({
-      '衛星写真（Esri）': esriSatellite,
-      '航空写真（国土地理院）': gsiPhoto,
-      '地図（国土地理院）': gsiStd,
-      'OpenStreetMap': osm,
-    }).addTo(map);
+      const gsiStd = L.tileLayer(
+        'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+        { attribution: '&copy; 国土地理院', maxZoom: 18 }
+      );
 
-    // 描画レイヤー
-    const drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);
-    drawnItemsRef.current = drawnItems;
+      const osm = L.tileLayer(
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        { attribution: '&copy; OpenStreetMap', maxZoom: 19 }
+      );
 
-    // 既存ほ場レイヤー
-    const existingFields = new L.FeatureGroup();
-    map.addLayer(existingFields);
-    existingFieldsRef.current = existingFields;
+      esriSatellite.addTo(map);
 
-    // 描画コントロール
-    const drawControl = new L.Control.Draw({
-      position: 'topright',
-      draw: {
-        polygon: {
-          allowIntersection: false,
-          showArea: true,
-          shapeOptions: {
-            color: '#3388ff',
-            fillColor: '#3388ff',
-            fillOpacity: 0.3,
+      L.control.layers({
+        '衛星写真（Esri）': esriSatellite,
+        '航空写真（国土地理院）': gsiPhoto,
+        '地図（国土地理院）': gsiStd,
+        'OpenStreetMap': osm,
+      }).addTo(map);
+
+      // 描画レイヤー
+      const drawnItems = new L.FeatureGroup();
+      map.addLayer(drawnItems);
+      drawnItemsRef.current = drawnItems;
+
+      // 既存ほ場レイヤー
+      const existingFields = new L.FeatureGroup();
+      map.addLayer(existingFields);
+      existingFieldsRef.current = existingFields;
+
+      // 筆ポリゴンレイヤー
+      const fudePolygonsLayer = new L.FeatureGroup();
+      map.addLayer(fudePolygonsLayer);
+      fudePolygonsRef.current = fudePolygonsLayer;
+
+      // 描画コントロール
+      const drawControl = new L.Control.Draw({
+        position: 'topright',
+        draw: {
+          polygon: {
+            allowIntersection: false,
+            showArea: true,
+            shapeOptions: {
+              color: '#3388ff',
+              fillColor: '#3388ff',
+              fillOpacity: 0.3,
+            },
           },
+          polyline: false,
+          circle: false,
+          rectangle: false,
+          marker: false,
+          circlemarker: false,
         },
-        polyline: false,
-        circle: false,
-        rectangle: false,
-        marker: false,
-        circlemarker: false,
-      },
-      edit: {
-        featureGroup: drawnItems,
-        remove: true,
-        edit: true,
-      },
-    });
-    map.addControl(drawControl);
-
-    // ポリゴン作成イベント
-    map.on(L.Draw.Event.CREATED, (e) => {
-      drawnItems.clearLayers();
-      drawnItems.addLayer(e.layer);
-
-      const latlngs = e.layer.getLatLngs()[0];
-      const coords = latlngs.map((ll) => [ll.lat, ll.lng]);
-      const area = L.GeometryUtil.geodesicArea(latlngs);
-
-      setAreaInfo({
-        area_m2: area,
-        area_a: (area / 100).toFixed(2),
-        area_ha: (area / 10000).toFixed(4),
+        edit: {
+          featureGroup: drawnItems,
+          remove: true,
+          edit: true,
+        },
       });
+      map.addControl(drawControl);
 
-      if (onPolygonCreated) {
-        onPolygonCreated(coords, area);
-      }
-    });
+      // ポリゴン作成イベント
+      map.on(L.Draw.Event.CREATED, (e) => {
+        drawnItems.clearLayers();
+        drawnItems.addLayer(e.layer);
 
-    // ポリゴン編集イベント
-    map.on(L.Draw.Event.EDITED, (e) => {
-      e.layers.eachLayer((layer) => {
-        const latlngs = layer.getLatLngs()[0];
+        const latlngs = e.layer.getLatLngs()[0];
         const coords = latlngs.map((ll) => [ll.lat, ll.lng]);
         const area = L.GeometryUtil.geodesicArea(latlngs);
 
@@ -145,19 +149,42 @@ export default function FieldMap({
           onPolygonCreated(coords, area);
         }
       });
-    });
 
-    // ポリゴン削除イベント
-    map.on(L.Draw.Event.DELETED, () => {
-      setAreaInfo(null);
-      if (onPolygonCreated) {
-        onPolygonCreated(null, 0);
-      }
-    });
+      // ポリゴン編集イベント
+      map.on(L.Draw.Event.EDITED, (e) => {
+        e.layers.eachLayer((layer) => {
+          const latlngs = layer.getLatLngs()[0];
+          const coords = latlngs.map((ll) => [ll.lat, ll.lng]);
+          const area = L.GeometryUtil.geodesicArea(latlngs);
+
+          setAreaInfo({
+            area_m2: area,
+            area_a: (area / 100).toFixed(2),
+            area_ha: (area / 10000).toFixed(4),
+          });
+
+          if (onPolygonCreated) {
+            onPolygonCreated(coords, area);
+          }
+        });
+      });
+
+      // ポリゴン削除イベント
+      map.on(L.Draw.Event.DELETED, () => {
+        setAreaInfo(null);
+        if (onPolygonCreated) {
+          onPolygonCreated(null, 0);
+        }
+      });
+    };
+
+    initMap();
 
     return () => {
-      map.remove();
-      mapInstanceRef.current = null;
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
     };
   }, []);
 
@@ -207,6 +234,50 @@ export default function FieldMap({
     });
   }, [fields, selectedFieldId, onFieldClick]);
 
+  // 筆ポリゴンの表示更新
+  useEffect(() => {
+    if (!fudePolygonsRef.current) return;
+
+    fudePolygonsRef.current.clearLayers();
+
+    if (!showFudePolygons || !fudePolygons.length) return;
+
+    fudePolygons.forEach((fude) => {
+      if (!fude.coordinates || fude.coordinates.length < 3) return;
+
+      const polygon = L.polygon(fude.coordinates, {
+        color: '#ff8c00',
+        fillColor: '#ffa500',
+        fillOpacity: 0.2,
+        weight: 1,
+        dashArray: '3, 3',
+      });
+
+      // 土地種別の表示名
+      const landTypeNames = { '100': '田', '200': '畑' };
+      const landTypeName = landTypeNames[fude.land_type] || fude.land_type || '-';
+
+      polygon.bindPopup(`
+        <div>
+          <b>筆ポリゴン</b><br>
+          種別: ${landTypeName}<br>
+          面積: ${fude.area_ha?.toFixed(2) || '-'} ha<br>
+          <button onclick="window.__selectFudePolygon && window.__selectFudePolygon('${fude.fude_id}')" style="margin-top:8px;padding:4px 8px;cursor:pointer;">
+            選択してほ場に取り込み
+          </button>
+        </div>
+      `);
+
+      polygon.on('click', () => {
+        if (onFudePolygonClick) {
+          onFudePolygonClick(fude);
+        }
+      });
+
+      fudePolygonsRef.current.addLayer(polygon);
+    });
+  }, [fudePolygons, showFudePolygons, onFudePolygonClick]);
+
   // 住所検索で地図移動
   const moveToLocation = useCallback((lat, lng, zoom = 16) => {
     if (mapInstanceRef.current) {
@@ -253,14 +324,34 @@ export default function FieldMap({
     }
   }, [onPolygonCreated]);
 
+  // 現在の地図範囲を取得
+  const getBounds = useCallback(() => {
+    if (!mapInstanceRef.current) return null;
+    const bounds = mapInstanceRef.current.getBounds();
+    return {
+      min_lat: bounds.getSouth(),
+      max_lat: bounds.getNorth(),
+      min_lng: bounds.getWest(),
+      max_lng: bounds.getEast(),
+    };
+  }, []);
+
+  // 現在のズームレベルを取得
+  const getZoom = useCallback(() => {
+    if (!mapInstanceRef.current) return 14;
+    return mapInstanceRef.current.getZoom();
+  }, []);
+
   // ref経由でメソッドを公開
   useEffect(() => {
     if (mapRef.current) {
       mapRef.current.moveToLocation = moveToLocation;
       mapRef.current.clearDrawing = clearDrawing;
       mapRef.current.setPolygon = setPolygon;
+      mapRef.current.getBounds = getBounds;
+      mapRef.current.getZoom = getZoom;
     }
-  }, [moveToLocation, clearDrawing, setPolygon]);
+  }, [moveToLocation, clearDrawing, setPolygon, getBounds, getZoom]);
 
   return (
     <div className="field-map-container">

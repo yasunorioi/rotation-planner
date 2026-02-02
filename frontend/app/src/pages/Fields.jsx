@@ -316,11 +316,8 @@ export default function Fields() {
           >
             {showYearlyView ? '📋 通常表示' : '📅 年度別表示'}
           </button>
-          <button onClick={() => setShowForm(true)} className="btn-primary">
-            + 新規ほ場
-          </button>
-          <button onClick={handleExportKmz} className="btn-secondary" title="KMZエクスポート">
-            🌍 KMZ
+          <button onClick={() => navigate('/field-register')} className="btn-primary">
+            + ほ場登録
           </button>
           {selectedFieldIds.size > 0 && (
             <button onClick={handleGoToPesticideOrders} className="btn-primary">
@@ -354,7 +351,7 @@ export default function Fields() {
       {showForm && (
         <div className="modal-overlay">
           <div className="modal">
-            <h2>{editingId ? 'ほ場編集' : '新規ほ場'}</h2>
+            <h2>ほ場編集</h2>
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>ほ場コード *</label>

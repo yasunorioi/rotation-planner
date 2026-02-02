@@ -36,6 +36,31 @@ api.interceptors.response.use(
 );
 
 // =============================================================================
+// 認証付きダウンロードヘルパー
+// =============================================================================
+
+export const downloadWithAuth = async (url, filename) => {
+  const token = localStorage.getItem('token');
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(downloadUrl);
+  a.remove();
+};
+
+// =============================================================================
 // ダッシュボード統計
 // =============================================================================
 
@@ -379,22 +404,6 @@ export const pesticideRecordApi = {
 };
 
 // =============================================================================
-// 在庫管理
-// =============================================================================
-
-export const inventoryApi = {
-  /**
-   * 農薬名で在庫情報を取得
-   * @param {string} pesticideName - 農薬名
-   * @returns {Promise<{pesticide_name: string, amount: number|null, unit: string|null, exists: boolean}>}
-   */
-  getByPesticide: async (pesticideName) => {
-    const res = await api.get('/api/inventory/by-pesticide', { params: { pesticide_name: pesticideName } });
-    return res.data;
-  },
-};
-
-// =============================================================================
 // JA集計 (管理者用)
 // =============================================================================
 
@@ -535,6 +544,14 @@ export const inventoryApi = {
    */
   list: async (params = {}) => {
     const res = await api.get('/api/inventory', { params });
+    return res.data;
+  },
+  /**
+   * 農薬名で在庫情報を取得
+   * @param {string} pesticideName - 農薬名
+   */
+  getByPesticide: async (pesticideName) => {
+    const res = await api.get('/api/inventory/by-pesticide', { params: { pesticide_name: pesticideName } });
     return res.data;
   },
   /**

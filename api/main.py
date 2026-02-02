@@ -2468,7 +2468,7 @@ def export_fields_kmz(current_user: Dict = Depends(get_current_user)):
     # KML用のほ場データを準備
     kml_fields = []
     for f in fields:
-        coordinates = f.get("coordinates")
+        coordinates = f.get("coordinates_json")
         if isinstance(coordinates, str):
             try:
                 coordinates = json.loads(coordinates)

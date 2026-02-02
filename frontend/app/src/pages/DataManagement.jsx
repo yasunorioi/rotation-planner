@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { fieldApi, planApi, pesticideRecordApi, cropApi, rotationApi, constraintApi, inventoryApi, adminApi } from '../lib/api';
+import { fieldApi, planApi, pesticideRecordApi, cropApi, rotationApi, constraintApi, inventoryApi, adminApi, downloadWithAuth } from '../lib/api';
 import { Spinner } from '../components/Loading';
 import { EmptyState } from '../components/ErrorMessage';
 
@@ -107,23 +107,57 @@ export default function DataManagement() {
   // エクスポート機能
   // =============================================================================
 
-  const handleExportFields = () => {
-    window.open(fieldApi.exportCsv(), '_blank');
-    setExportMessage({ type: 'success', text: 'ほ場データのダウンロードを開始しました' });
+  const handleExportFields = async () => {
+    setIsExporting(true);
+    try {
+      await downloadWithAuth(fieldApi.exportCsv(), 'fields.csv');
+      setExportMessage({ type: 'success', text: 'ほ場データをダウンロードしました' });
+    } catch (err) {
+      setExportMessage({ type: 'error', text: 'ダウンロードに失敗しました: ' + err.message });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  const handleExportRecords = () => {
-    window.open(pesticideRecordApi.exportCsv(exportYear), '_blank');
-    setExportMessage({ type: 'success', text: `${exportYear}年の防除記録のダウンロードを開始しました` });
+  const handleExportFieldsKmz = async () => {
+    setIsExporting(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      await downloadWithAuth(fieldApi.exportKmz(), `fields_export_${today}.kmz`);
+      setExportMessage({ type: 'success', text: 'ほ場データ（KMZ）をダウンロードしました' });
+    } catch (err) {
+      setExportMessage({ type: 'error', text: 'KMZダウンロードに失敗しました: ' + err.message });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  const handleExportPlan = () => {
+  const handleExportRecords = async () => {
+    setIsExporting(true);
+    try {
+      await downloadWithAuth(pesticideRecordApi.exportCsv(exportYear), `pesticide_records_${exportYear}.csv`);
+      setExportMessage({ type: 'success', text: `${exportYear}年の防除記録をダウンロードしました` });
+    } catch (err) {
+      setExportMessage({ type: 'error', text: 'ダウンロードに失敗しました: ' + err.message });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportPlan = async () => {
     if (!selectedPlanId) {
       setExportMessage({ type: 'error', text: '計画を選択してください' });
       return;
     }
-    window.open(planApi.exportCsv(selectedPlanId), '_blank');
-    setExportMessage({ type: 'success', text: '輪作計画のダウンロードを開始しました' });
+    setIsExporting(true);
+    try {
+      await downloadWithAuth(planApi.exportCsv(selectedPlanId), `rotation_plan_${selectedPlanId}.csv`);
+      setExportMessage({ type: 'success', text: '輪作計画をダウンロードしました' });
+    } catch (err) {
+      setExportMessage({ type: 'error', text: 'ダウンロードに失敗しました: ' + err.message });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleExportHistory = async () => {
@@ -826,9 +860,14 @@ export default function DataManagement() {
             <div className="export-icon">🗺️</div>
             <h3>ほ場データ</h3>
             <p>登録済みのほ場情報をエクスポート</p>
-            <button onClick={handleExportFields} className="btn-primary">
-              ダウンロード
-            </button>
+            <div className="btn-group">
+              <button onClick={handleExportFields} className="btn-primary" disabled={isExporting}>
+                CSV
+              </button>
+              <button onClick={handleExportFieldsKmz} className="btn-secondary" disabled={isExporting}>
+                KMZ
+              </button>
+            </div>
           </div>
 
           <div className="export-card">

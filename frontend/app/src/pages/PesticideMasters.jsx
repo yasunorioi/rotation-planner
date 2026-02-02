@@ -2,8 +2,10 @@
  * 防除マスタページ
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { pesticideMasterApi, cropApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function PesticideMasters() {
   const [masters, setMasters] = useState([]);
@@ -24,6 +26,11 @@ export default function PesticideMasters() {
     notes: '',
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [message, setMessage] = useState(null);
+
+  // CSVインポート用
+  const [isImporting, setIsImporting] = useState(false);
+  const csvInputRef = useRef(null);
 
   useEffect(() => {
     loadCrops();
@@ -119,6 +126,56 @@ export default function PesticideMasters() {
     }
   };
 
+  // CSVインポート - ファイル選択
+  const handleCsvFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (ext !== 'csv') {
+      setMessage({ type: 'error', text: 'CSVファイルを選択してください' });
+      return;
+    }
+
+    setIsImporting(true);
+    setMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await pesticideMasterApi.importCsv(formData);
+
+      const msgs = [];
+      if (result.imported > 0) {
+        msgs.push(`${result.imported}件をインポート`);
+      }
+      if (result.skipped > 0) {
+        msgs.push(`${result.skipped}件をスキップ（重複）`);
+      }
+      if (result.errors?.length > 0) {
+        msgs.push(`${result.errors.length}件のエラー`);
+      }
+
+      setMessage({
+        type: result.imported > 0 ? 'success' : (result.errors?.length > 0 ? 'error' : 'info'),
+        text: msgs.join('、') || 'インポート完了',
+        details: result.errors?.slice(0, 5),
+      });
+
+      if (result.imported > 0) {
+        loadMasters();
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || 'インポートに失敗しました';
+      setMessage({ type: 'error', text: detail });
+    } finally {
+      setIsImporting(false);
+      if (csvInputRef.current) {
+        csvInputRef.current.value = '';
+      }
+    }
+  };
+
   const categories = ['殺虫剤', '殺菌剤', '除草剤', '殺虫殺菌剤', 'その他'];
 
   return (
@@ -138,11 +195,40 @@ export default function PesticideMasters() {
               </option>
             ))}
           </select>
+          {/* CSVインポート */}
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleCsvFileSelect}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => csvInputRef.current?.click()}
+            className="btn-secondary"
+            disabled={isImporting}
+            title="CSVフォーマット: name, crop, category, manufacturer, dilution_rate, notes"
+          >
+            {isImporting ? '⏳ インポート中...' : '📤 CSVインポート'}
+          </button>
           <button onClick={() => setShowForm(true)} className="btn-primary">
             + 新規農薬
           </button>
         </div>
       </div>
+
+      {message && (
+        <div className={`message ${message.type}`} style={{ marginBottom: '16px' }}>
+          <div>{message.text}</div>
+          {message.details && message.details.length > 0 && (
+            <ul style={{ marginTop: '8px', fontSize: '0.9em', paddingLeft: '20px' }}>
+              {message.details.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <div className="modal-overlay">
@@ -261,9 +347,9 @@ export default function PesticideMasters() {
       )}
 
       {isLoading ? (
-        <p>読み込み中...</p>
+        <Spinner text="農薬マスタを読み込み中..." />
       ) : masters.length === 0 ? (
-        <p className="empty-message">農薬が登録されていません</p>
+        <EmptyState message="農薬が登録されていません" icon="💊" />
       ) : (
         <table className="data-table">
           <thead>

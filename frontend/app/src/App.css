@@ -391,6 +391,64 @@ button {
   font-weight: 600;
 }
 
+/* 今年度の計画セクション */
+.plan-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.plan-section h2 {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
+
+.plan-section .plan-name {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+
+.plan-section .plan-name a {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.plan-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+  padding: 10px 16px;
+  border-radius: var(--radius);
+}
+
+.plan-item .plan-field {
+  font-weight: 500;
+}
+
+.plan-item .plan-crop {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.no-plan {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+}
+
+.no-plan p {
+  margin-bottom: 16px;
+}
+
 .quick-links h2 {
   margin-bottom: 16px;
 }
@@ -1643,6 +1701,77 @@ button {
   margin: 0;
   width: 16px;
   height: 16px;
+}
+
+/* 地区フィルター */
+.district-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 0;
+}
+
+.district-filter .filter-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.district-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.district-tab {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.district-tab:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.district-tab.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.district-summary {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f0f7ff;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.district-summary .summary-item {
+  font-weight: 500;
+  color: var(--primary-dark);
+}
+
+/* 年別サマリー合計列 */
+.summary-table .total-cell {
+  font-weight: bold;
+  background: #f8fafc;
+}
+
+/* サブタイトル */
+h3 .subtitle {
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--primary);
+  margin-left: 8px;
 }
 
 /* =============================================================================

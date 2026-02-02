@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react';
 import { adminApi } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function UserManagement() {
   const { user } = useAuthStore();
@@ -224,9 +226,9 @@ export default function UserManagement() {
       )}
 
       {isLoading ? (
-        <p>読み込み中...</p>
+        <Spinner text="ユーザー一覧を読み込み中..." />
       ) : users.length === 0 ? (
-        <p className="empty-message">ユーザーが登録されていません</p>
+        <EmptyState message="ユーザーが登録されていません" icon="👥" />
       ) : (
         <table className="data-table">
           <thead>

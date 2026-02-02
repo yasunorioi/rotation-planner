@@ -10,6 +10,8 @@
 import { useEffect, useState } from 'react';
 import { jaApi } from '../lib/api';
 import { useAuthStore } from '../store/authStore';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function JAAggregation() {
   const { user } = useAuthStore();
@@ -215,9 +217,9 @@ export default function JAAggregation() {
           ) : (
             <>
               {isLoading ? (
-                <p>読み込み中...</p>
+                <Spinner text="農家一覧を読み込み中..." />
               ) : farmers.length === 0 ? (
-                <p className="empty-message">農家が登録されていません</p>
+                <EmptyState message="農家が登録されていません" icon="👤" />
               ) : (
                 <table className="data-table">
                   <thead>
@@ -288,7 +290,7 @@ export default function JAAggregation() {
           </div>
 
           {isLoading ? (
-            <p>読み込み中...</p>
+            <Spinner text="集計データを読み込み中..." />
           ) : detailView === 'summary' ? (
             // サマリー表示
             pesticideAggregation.length === 0 ? (

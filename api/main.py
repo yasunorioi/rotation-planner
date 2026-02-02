@@ -40,8 +40,10 @@ from rotation_planner.common import (
     PesticideMasterRepository,
     PesticideOrderRepository,
     PesticideRecordRepository,
+    InventoryRepository,
     JAStaffRepository,
     ensure_crop_tables,
+    ensure_inventory_tables,
 )
 
 # GPSマッチング機能
@@ -53,12 +55,16 @@ from rotation_planner.field.gps_matcher import (
 )
 
 # KMLパーサー
-from rotation_planner.field.kml_parser import parse_kml_or_kmz_bytes
+from rotation_planner.field.kml_parser import parse_kml_or_kmz_bytes, generate_kml_content
+import zipfile
 
 # OR-Tools最適化
 from rotation_planner.app.optimizer import RotationPlannerORTools
 from rotation_planner.app.utils import Field
 from rotation_planner.app.constraints import Constraints, FIXED_FORBIDDEN_TRANSITIONS
+
+# 在庫管理API
+from inventory_api import router as inventory_router, create_inventory_routes, ensure_inventory_tables
 
 # =============================================================================
 # アプリケーション設定
@@ -83,6 +89,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     ensure_crop_tables()
+    ensure_inventory_tables()
 
 # JWT設定
 JWT_SECRET = os.environ.get("JWT_SECRET")
@@ -205,6 +212,14 @@ class PlanResponse(BaseModel):
     details: Optional[List[Dict[str, Any]]] = None
 
 
+class PlanUpdate(BaseModel):
+    """輪作計画の更新リクエスト（部分更新対応）"""
+    name: Optional[str] = None
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+    details: Optional[List[Dict[str, Any]]] = None
+
+
 class ConstraintsUpdate(BaseModel):
     constraints: List[Dict[str, Any]]
     forbidden_transitions: Optional[str] = ""
@@ -280,6 +295,13 @@ class PesticideOrderResponse(BaseModel):
     created_at: Optional[str]
 
 
+class PesticideOrderUpdate(BaseModel):
+    """農薬発注の更新リクエスト（部分更新対応）"""
+    year: Optional[int] = None
+    items: Optional[List[Dict[str, Any]]] = None
+    notes: Optional[str] = None
+
+
 # 防除記録
 class PesticideRecordCreate(BaseModel):
     field_id: int
@@ -315,6 +337,24 @@ class PesticideRecordResponse(BaseModel):
     operator: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[str] = None
+
+
+class PesticideRecordCreateResponse(BaseModel):
+    """防除記録作成レスポンス（在庫警告付き）"""
+    record: PesticideRecordResponse
+    inventory_warning: bool = False
+    inventory_message: Optional[str] = None
+    inventory_remaining: Optional[float] = None
+
+
+class InventoryInfoResponse(BaseModel):
+    """在庫情報レスポンス"""
+    pesticide_name: str
+    amount: Optional[float] = None
+    unit: Optional[str] = None
+    exists: bool = False
+    last_used_date: Optional[str] = None
+    usage_count: Optional[int] = None
 
 
 # GPSマッチング
@@ -395,6 +435,13 @@ def require_admin(current_user: Dict = Depends(get_current_user)) -> Dict:
     if current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
+
+
+# =============================================================================
+# 在庫管理ルーター登録
+# =============================================================================
+create_inventory_routes(get_current_user)
+app.include_router(inventory_router)
 
 
 # =============================================================================
@@ -1206,6 +1253,59 @@ def list_crop_history(field_id: int, current_user: Dict = Depends(get_current_us
     return [CropHistoryResponse(**h) for h in history]
 
 
+@app.get("/api/fields/{field_id}/current-crop")
+def get_field_current_crop(field_id: int, year: int = None, current_user: Dict = Depends(get_current_user)):
+    """
+    ほ場の当年作物を輪作計画から取得
+    輪作計画がない場合は作付履歴から取得
+    """
+    field = FieldRepository.get_field(field_id)
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if year is None:
+        year = datetime.now().year
+
+    # 輪作計画から作物を取得（最新の計画を優先）
+    plans = PlanRepository.get_plans(current_user["id"])
+    for plan_summary in plans:
+        plan = PlanRepository.get_plan(plan_summary["id"])
+        if not plan or not plan.get("details"):
+            continue
+        # 計画の期間内かチェック
+        if plan["start_year"] <= year <= plan["end_year"]:
+            # 該当ほ場・年の作物を検索
+            for detail in plan["details"]:
+                if detail["field_id"] == field_id and detail["year"] == year:
+                    return {
+                        "crop": detail["crop"],
+                        "source": "plan",
+                        "plan_id": plan["id"],
+                        "plan_name": plan["name"]
+                    }
+
+    # 輪作計画にない場合は作付履歴から取得
+    history = CropHistoryRepository.get_history(field_id)
+    for h in history:
+        if h["year"] == year:
+            return {
+                "crop": h["crop"],
+                "source": "history",
+                "plan_id": None,
+                "plan_name": None
+            }
+
+    # どちらにもない場合
+    return {
+        "crop": None,
+        "source": None,
+        "plan_id": None,
+        "plan_name": None
+    }
+
+
 @app.post("/api/fields/{field_id}/history", response_model=CropHistoryResponse, status_code=201)
 def add_crop_history(field_id: int, history: CropHistoryCreate, current_user: Dict = Depends(get_current_user)):
     field = FieldRepository.get_field(field_id)
@@ -1265,6 +1365,33 @@ def get_plan(plan_id: int, current_user: Dict = Depends(get_current_user)):
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     return PlanResponse(**plan)
+
+
+@app.put("/api/plans/{plan_id}", response_model=PlanResponse)
+def update_plan(plan_id: int, plan_update: PlanUpdate, current_user: Dict = Depends(get_current_user)):
+    """輪作計画を更新（部分更新対応）"""
+    plan = PlanRepository.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 更新データを構築（Noneでないフィールドのみ）
+    update_data = {}
+    if plan_update.name is not None:
+        update_data["name"] = plan_update.name
+    if plan_update.start_year is not None:
+        update_data["start_year"] = plan_update.start_year
+    if plan_update.end_year is not None:
+        update_data["end_year"] = plan_update.end_year
+    if plan_update.details is not None:
+        update_data["details"] = plan_update.details
+
+    if update_data:
+        PlanRepository.update_plan(plan_id, update_data)
+
+    updated = PlanRepository.get_plan(plan_id)
+    return PlanResponse(**updated)
 
 
 @app.delete("/api/plans/{plan_id}", status_code=204)
@@ -1482,6 +1609,35 @@ def get_pesticide_order(order_id: int, current_user: Dict = Depends(get_current_
     if order["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     return PesticideOrderResponse(**order)
+
+
+@app.put("/api/pesticide-orders/{order_id}", response_model=PesticideOrderResponse)
+def update_pesticide_order(
+    order_id: int,
+    order_update: PesticideOrderUpdate,
+    current_user: Dict = Depends(get_current_user)
+):
+    """農薬発注を更新（部分更新対応）"""
+    order = PesticideOrderRepository.get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 更新データを構築（Noneでないフィールドのみ）
+    update_data = {}
+    if order_update.year is not None:
+        update_data["year"] = order_update.year
+    if order_update.items is not None:
+        update_data["items"] = order_update.items
+    if order_update.notes is not None:
+        update_data["notes"] = order_update.notes
+
+    if update_data:
+        PesticideOrderRepository.update_order(order_id, update_data)
+
+    updated = PesticideOrderRepository.get_order(order_id)
+    return PesticideOrderResponse(**updated)
 
 
 @app.delete("/api/pesticide-orders/{order_id}", status_code=204)
@@ -1761,14 +1917,40 @@ def list_pesticide_records(
     return [PesticideRecordResponse(**r) for r in records]
 
 
-@app.post("/api/pesticide-records", response_model=PesticideRecordResponse, status_code=201)
+@app.post("/api/pesticide-records", response_model=PesticideRecordCreateResponse, status_code=201)
 def create_pesticide_record(record: PesticideRecordCreate, current_user: Dict = Depends(get_current_user)):
+    # 防除記録を作成
     record_id = PesticideRecordRepository.create_record(
         user_id=current_user["id"],
         data=record.model_dump()
     )
     created = PesticideRecordRepository.get_record(record_id)
-    return PesticideRecordResponse(**created)
+
+    # 在庫自動控除
+    inventory_warning = False
+    inventory_message = None
+    inventory_remaining = None
+
+    if record.quantity and record.quantity > 0 and record.pesticide_name:
+        inv_result = InventoryRepository.deduct_inventory(
+            user_id=current_user["id"],
+            pesticide_name=record.pesticide_name,
+            quantity=record.quantity,
+            unit=record.unit or "L",
+            reference_type="pesticide_record",
+            reference_id=record_id,
+            created_by=current_user["id"]
+        )
+        inventory_warning = inv_result.get("warning", False)
+        inventory_message = inv_result.get("message")
+        inventory_remaining = inv_result.get("remaining")
+
+    return PesticideRecordCreateResponse(
+        record=PesticideRecordResponse(**created),
+        inventory_warning=inventory_warning,
+        inventory_message=inventory_message,
+        inventory_remaining=inventory_remaining
+    )
 
 
 @app.get("/api/pesticide-records/{record_id}", response_model=PesticideRecordResponse)
@@ -1801,6 +1983,37 @@ def delete_pesticide_record(record_id: int, current_user: Dict = Depends(get_cur
     if existing["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     PesticideRecordRepository.delete_record(record_id)
+
+
+# =============================================================================
+# 在庫情報取得（防除記録との連携用）
+# =============================================================================
+
+@app.get("/api/inventory/by-pesticide", response_model=InventoryInfoResponse)
+def get_inventory_by_pesticide(
+    pesticide_name: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """農薬名で在庫情報を取得"""
+    inv = InventoryRepository.get_inventory_by_pesticide(
+        user_id=current_user["id"],
+        pesticide_name=pesticide_name
+    )
+
+    if inv:
+        return InventoryInfoResponse(
+            pesticide_name=pesticide_name,
+            amount=inv.get("amount"),
+            unit=inv.get("unit"),
+            exists=True,
+            last_used_date=inv.get("last_used_date"),
+            usage_count=inv.get("usage_count")
+        )
+    else:
+        return InventoryInfoResponse(
+            pesticide_name=pesticide_name,
+            exists=False
+        )
 
 
 @app.get("/api/pesticide-records/export/csv")
@@ -2237,6 +2450,121 @@ def export_plan_csv(plan_id: int, current_user: Dict = Depends(get_current_user)
         io.BytesIO(output.getvalue().encode("utf-8-sig")),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=plan_{plan_id}.csv"}
+    )
+
+
+@app.get("/api/export/fields/kmz")
+def export_fields_kmz(current_user: Dict = Depends(get_current_user)):
+    """
+    ほ場データKMZエクスポート
+
+    ほ場のポリゴン座標をKML形式にしてKMZ（ZIP圧縮）で出力する。
+    """
+    import json
+
+    user_id = current_user["id"]
+    fields = FieldRepository.get_fields(user_id)
+
+    # KML用のほ場データを準備
+    kml_fields = []
+    for f in fields:
+        coordinates = f.get("coordinates")
+        if isinstance(coordinates, str):
+            try:
+                coordinates = json.loads(coordinates)
+            except json.JSONDecodeError:
+                continue
+        if not coordinates or len(coordinates) < 3:
+            continue
+
+        kml_fields.append({
+            "field_id": f.get("field_code", f"F{f['id']}"),
+            "name": f.get("name") or f.get("field_code", ""),
+            "coordinates": coordinates,
+            "area_ha": f.get("area_ha"),
+        })
+
+    if not kml_fields:
+        raise HTTPException(status_code=400, detail="エクスポート可能なほ場がありません（座標データなし）")
+
+    # KML生成
+    kml_content = generate_kml_content(kml_fields, name="ほ場一覧")
+
+    # KMZ（ZIP圧縮）
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('doc.kml', kml_content.encode('utf-8'))
+    output.seek(0)
+
+    # ファイル名に日付を付与
+    filename = f"fields_export_{datetime.now().strftime('%Y%m%d')}.kmz"
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.google-earth.kmz",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+class ApplyToHistoryRequest(BaseModel):
+    """履歴反映リクエスト"""
+    confirm_overwrite: bool = False
+
+
+class ApplyToHistoryResponse(BaseModel):
+    """履歴反映レスポンス"""
+    success: bool
+    applied_count: int
+    message: str
+
+
+@app.post("/api/plans/{plan_id}/apply-to-history", response_model=ApplyToHistoryResponse)
+def apply_plan_to_history(
+    plan_id: int,
+    request: ApplyToHistoryRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    輪作計画を作付履歴に反映
+
+    計画の各ほ場×年の作物を作付履歴テーブルに一括登録する。
+    既存の履歴がある場合は上書きされる。
+    """
+    plan = PlanRepository.get_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="計画が見つかりません")
+
+    # 権限チェック
+    if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
+        raise HTTPException(status_code=403, detail="この計画にアクセスする権限がありません")
+
+    details = plan.get("details", [])
+    if not details:
+        raise HTTPException(status_code=400, detail="計画に詳細データがありません")
+
+    # 履歴に反映
+    applied_count = 0
+    for d in details:
+        field_id = d.get("field_id")
+        year = d.get("year")
+        crop = d.get("crop")
+
+        if not field_id or not year or not crop:
+            continue
+
+        # 年度を令和年に変換（計画では令和年を使用）
+        year_str = f"R{year}" if isinstance(year, int) else str(year)
+        if not year_str.startswith("R"):
+            year_str = f"R{year_str}"
+
+        # 履歴に追加（INSERT OR REPLACE）
+        CropHistoryRepository.add_history(field_id, year_str, crop, is_inferred=False)
+        applied_count += 1
+
+    return ApplyToHistoryResponse(
+        success=True,
+        applied_count=applied_count,
+        message=f"{applied_count}件の作付履歴を登録しました"
     )
 
 

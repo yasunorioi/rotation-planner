@@ -10,6 +10,8 @@
 
 import { useEffect, useState } from 'react';
 import { pesticideOrderApi, pesticideMasterApi, cropApi, planApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function PesticideOrders() {
   const [orders, setOrders] = useState([]);
@@ -31,6 +33,13 @@ export default function PesticideOrders() {
   const [calculatedItems, setCalculatedItems] = useState([]);
   const [calcMessage, setCalcMessage] = useState('');
   const [isCalculating, setIsCalculating] = useState(false);
+
+  // 編集用の状態
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    items: [],
+  });
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
@@ -141,6 +150,54 @@ export default function PesticideOrders() {
       } catch (err) {
         alert('削除に失敗しました');
       }
+    }
+  };
+
+  // =========================================================================
+  // 編集機能
+  // =========================================================================
+
+  const openEditForm = (order) => {
+    setEditingOrder(order);
+    setEditFormData({
+      items: (order.items || []).map((item) => ({
+        pesticide_name: item.pesticide_name || '',
+        crop: item.crop || '',
+        quantity: item.quantity?.toString() || '',
+        unit: item.unit || '本',
+      })),
+    });
+    setShowEditForm(true);
+  };
+
+  const resetEditForm = () => {
+    setEditingOrder(null);
+    setEditFormData({ items: [] });
+    setShowEditForm(false);
+  };
+
+  const handleEditItemChange = (index, field, value) => {
+    const newItems = [...editFormData.items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setEditFormData({ ...editFormData, items: newItems });
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+
+    try {
+      const items = editFormData.items.map((item) => ({
+        pesticide_name: item.pesticide_name,
+        crop: item.crop,
+        quantity: parseFloat(item.quantity),
+        unit: item.unit,
+      }));
+      await pesticideOrderApi.update(editingOrder.id, { items });
+      resetEditForm();
+      loadOrders();
+    } catch (err) {
+      alert('更新に失敗しました');
     }
   };
 
@@ -459,10 +516,92 @@ export default function PesticideOrders() {
         </div>
       )}
 
+      {/* 編集モーダル */}
+      {showEditForm && editingOrder && (
+        <div className="modal-overlay">
+          <div className="modal modal-lg">
+            <h2>発注内容を編集</h2>
+            <form onSubmit={handleEditSubmit}>
+              <div className="order-items-section">
+                <h3>発注明細</h3>
+                {editFormData.items.map((item, index) => (
+                  <div key={index} className="order-item-row">
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>農薬名 *</label>
+                        <input
+                          type="text"
+                          value={item.pesticide_name}
+                          onChange={(e) => handleEditItemChange(index, 'pesticide_name', e.target.value)}
+                          required
+                          list="pesticide-suggestions-edit"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>対象作物</label>
+                        <select
+                          value={item.crop}
+                          onChange={(e) => handleEditItemChange(index, 'crop', e.target.value)}
+                        >
+                          <option value="">選択してください</option>
+                          {crops.map((c) => (
+                            <option key={c.crop_id} value={c.crop_name}>
+                              {c.custom_name || c.crop_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>数量 *</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          value={item.quantity}
+                          onChange={(e) => handleEditItemChange(index, 'quantity', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>単位</label>
+                        <select
+                          value={item.unit}
+                          onChange={(e) => handleEditItemChange(index, 'unit', e.target.value)}
+                        >
+                          <option value="本">本</option>
+                          <option value="袋">袋</option>
+                          <option value="kg">kg</option>
+                          <option value="L">L</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <datalist id="pesticide-suggestions-edit">
+                {masters.map((m) => (
+                  <option key={m.id} value={m.name} />
+                ))}
+              </datalist>
+
+              <div className="form-actions">
+                <button type="button" onClick={resetEditForm} className="btn-secondary">
+                  キャンセル
+                </button>
+                <button type="submit" className="btn-primary">
+                  更新
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
-        <p>読み込み中...</p>
+        <Spinner text="発注データを読み込み中..." />
       ) : orders.length === 0 ? (
-        <p className="empty-message">{selectedYear}年の発注がありません</p>
+        <EmptyState message={`${selectedYear}年の発注がありません`} icon="📦" />
       ) : (
         <div className="orders-list">
           {orders.map((order) => (
@@ -471,9 +610,14 @@ export default function PesticideOrders() {
                 <span className="order-date">
                   作成: {order.created_at ? new Date(order.created_at).toLocaleDateString() : '-'}
                 </span>
-                <button onClick={() => handleDelete(order.id)} className="btn-icon btn-danger">
-                  🗑️
-                </button>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button onClick={() => openEditForm(order)} className="btn-icon">
+                    ✏️
+                  </button>
+                  <button onClick={() => handleDelete(order.id)} className="btn-icon btn-danger">
+                    🗑️
+                  </button>
+                </div>
               </div>
               <table className="data-table">
                 <thead>

@@ -2048,6 +2048,243 @@ class OrderTemplateRepository:
 
 
 # =============================================================================
+# 在庫テーブル初期化
+# =============================================================================
+
+def ensure_inventory_tables():
+    """
+    inventory関連テーブルのマイグレーション
+    - inventoryテーブルに新カラム追加（既存データ保持）
+    - inventory_transactionsテーブル作成
+    - inventory_csv_operationsテーブル作成
+    """
+    with get_db() as conn:
+        # 1. inventoryテーブルにカラム追加（既存チェック付き）
+        cursor = conn.execute("PRAGMA table_info(inventory)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        new_columns = [
+            ("storage_location", "TEXT"),
+            ("expiry_date", "DATE"),
+            ("purchase_date", "DATE"),
+            ("purchase_price", "REAL"),
+            ("supplier", "TEXT"),
+            ("lot_number", "TEXT"),
+            ("last_used_date", "DATE"),
+            ("usage_count", "INTEGER DEFAULT 0"),
+        ]
+
+        for col_name, col_type in new_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(f"ALTER TABLE inventory ADD COLUMN {col_name} {col_type}")
+                except Exception as e:
+                    print(f"Warning: Failed to add column {col_name}: {e}")
+
+        # 2. inventory_transactionsテーブル
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+                transaction_type TEXT NOT NULL CHECK (transaction_type IN ('in', 'out', 'adjust')),
+                quantity REAL NOT NULL,
+                unit TEXT,
+                reference_type TEXT,
+                reference_id INTEGER,
+                notes TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_inventory ON inventory_transactions(inventory_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_type ON inventory_transactions(transaction_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_created ON inventory_transactions(created_at)")
+
+        # 3. inventory_csv_operationsテーブル
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_csv_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation_type TEXT NOT NULL CHECK (operation_type IN ('import', 'export')),
+                filename TEXT,
+                record_count INTEGER,
+                status TEXT CHECK (status IN ('success', 'partial', 'failed')),
+                error_message TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_csv_ops_type ON inventory_csv_operations(operation_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_csv_ops_created ON inventory_csv_operations(created_at)")
+
+        conn.commit()
+
+
+# =============================================================================
+# 在庫リポジトリ
+# =============================================================================
+
+class InventoryRepository:
+    """在庫管理のリポジトリ"""
+
+    @staticmethod
+    def get_inventory_by_pesticide(user_id: int, pesticide_name: str) -> Optional[Dict[str, Any]]:
+        """農薬名で在庫を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, pesticide_name, amount, unit,
+                       storage_location, expiry_date, last_used_date, usage_count, updated_at
+                FROM inventory
+                WHERE user_id = ? AND pesticide_name = ?
+                """,
+                (user_id, pesticide_name)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def get_inventory(inventory_id: int) -> Optional[Dict[str, Any]]:
+        """IDで在庫を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, pesticide_name, amount, unit,
+                       storage_location, expiry_date, last_used_date, usage_count, updated_at
+                FROM inventory
+                WHERE id = ?
+                """,
+                (inventory_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def deduct_inventory(user_id: int, pesticide_name: str, quantity: float, unit: str,
+                         reference_type: str = None, reference_id: int = None,
+                         created_by: int = None) -> Dict[str, Any]:
+        """
+        在庫を控除し、取引履歴を記録
+
+        Returns:
+            {
+                "success": bool,
+                "warning": bool,  # 在庫不足の警告
+                "remaining": float,  # 残量
+                "deducted": float,  # 控除量
+                "message": str
+            }
+        """
+        with get_db() as conn:
+            # 在庫を取得（なければ作成）
+            cursor = conn.execute(
+                "SELECT id, amount, unit FROM inventory WHERE user_id = ? AND pesticide_name = ?",
+                (user_id, pesticide_name)
+            )
+            inv = cursor.fetchone()
+
+            warning = False
+            remaining = 0.0
+            inventory_id = None
+
+            if inv:
+                inventory_id = inv["id"]
+                current_amount = inv["amount"] or 0.0
+
+                # 単位が異なる場合は警告（変換は行わない）
+                if inv["unit"] and unit and inv["unit"] != unit:
+                    warning = True
+
+                remaining = current_amount - quantity
+
+                # 在庫不足チェック
+                if remaining < 0:
+                    warning = True
+
+                # 在庫を更新
+                conn.execute(
+                    """
+                    UPDATE inventory
+                    SET amount = ?, last_used_date = DATE('now'), usage_count = usage_count + 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (remaining, inventory_id)
+                )
+            else:
+                # 在庫レコードがない場合は新規作成（マイナス在庫）
+                cursor = conn.execute(
+                    """
+                    INSERT INTO inventory (user_id, pesticide_name, amount, unit, last_used_date, usage_count)
+                    VALUES (?, ?, ?, ?, DATE('now'), 1)
+                    """,
+                    (user_id, pesticide_name, -quantity, unit)
+                )
+                inventory_id = cursor.lastrowid
+                remaining = -quantity
+                warning = True  # 在庫がなかった
+
+            # 取引履歴を記録
+            if inventory_id:
+                conn.execute(
+                    """
+                    INSERT INTO inventory_transactions
+                    (inventory_id, transaction_type, quantity, unit, reference_type, reference_id, created_by)
+                    VALUES (?, 'out', ?, ?, ?, ?, ?)
+                    """,
+                    (inventory_id, quantity, unit, reference_type, reference_id, created_by)
+                )
+
+            conn.commit()
+
+            message = ""
+            if warning:
+                if remaining < 0:
+                    message = f"在庫不足: {pesticide_name} (残量: {remaining:.1f}{unit or ''})"
+                elif not inv:
+                    message = f"在庫未登録: {pesticide_name}"
+
+            return {
+                "success": True,
+                "warning": warning,
+                "remaining": remaining,
+                "deducted": quantity,
+                "message": message,
+                "inventory_id": inventory_id
+            }
+
+    @staticmethod
+    def get_transactions(inventory_id: int = None, user_id: int = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """取引履歴を取得"""
+        with get_db() as conn:
+            if inventory_id:
+                cursor = conn.execute(
+                    """
+                    SELECT t.*, i.pesticide_name
+                    FROM inventory_transactions t
+                    JOIN inventory i ON t.inventory_id = i.id
+                    WHERE t.inventory_id = ?
+                    ORDER BY t.created_at DESC
+                    LIMIT ?
+                    """,
+                    (inventory_id, limit)
+                )
+            elif user_id:
+                cursor = conn.execute(
+                    """
+                    SELECT t.*, i.pesticide_name
+                    FROM inventory_transactions t
+                    JOIN inventory i ON t.inventory_id = i.id
+                    WHERE i.user_id = ?
+                    ORDER BY t.created_at DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit)
+                )
+            else:
+                return []
+            return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
 # 動作確認用
 # =============================================================================
 

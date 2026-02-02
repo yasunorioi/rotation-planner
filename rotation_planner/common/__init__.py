@@ -82,9 +82,11 @@ from rotation_planner.common.db_access import (
     PesticideRegistryRepository,
     PesticideUsageRepository,
     PesticideRecordRepository,
+    InventoryRepository,
     OrderTemplateRepository,
     MigrationUtils,
     ensure_crop_tables,
+    ensure_inventory_tables,
 )
 
 # モデル
@@ -177,8 +179,10 @@ __all__ = [
     "PesticideRegistryRepository",
     "PesticideUsageRepository",
     "PesticideRecordRepository",
+    "InventoryRepository",
     "MigrationUtils",
     "ensure_crop_tables",
+    "ensure_inventory_tables",
     # モデル
     "User",
     "Field",

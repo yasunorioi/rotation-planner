@@ -1,8 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════
 -- 農業管理アプリ - SQLiteスキーマ
--- Version: 1.1
+-- Version: 1.2
 -- Created: 2026-01-29
--- Updated: 2026-02-01
+-- Updated: 2026-02-02
 -- ═══════════════════════════════════════════════════════════════
 --
 -- 組織(org_id)について:
@@ -178,10 +178,53 @@ CREATE TABLE IF NOT EXISTS inventory (
     pesticide_name TEXT NOT NULL,
     amount REAL NOT NULL,
     unit TEXT NOT NULL,
+    storage_location TEXT,           -- 保管場所
+    expiry_date DATE,                -- 有効期限
+    purchase_date DATE,              -- 購入日
+    purchase_price REAL,             -- 購入価格
+    supplier TEXT,                   -- 仕入先
+    lot_number TEXT,                 -- ロット番号
+    last_used_date DATE,             -- 最終使用日
+    usage_count INTEGER DEFAULT 0,   -- 使用回数
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, pesticide_name)
 );
 CREATE INDEX IF NOT EXISTS idx_inventory_user ON inventory(user_id);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 11. 在庫入出庫履歴
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS inventory_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+    transaction_type TEXT NOT NULL CHECK (transaction_type IN ('in', 'out', 'adjust')),
+    quantity REAL NOT NULL,
+    unit TEXT,
+    reference_type TEXT,             -- 'csv_import', 'manual', 'pesticide_record', 'adjustment'
+    reference_id INTEGER,            -- 関連レコードID
+    notes TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_inv_trans_inventory ON inventory_transactions(inventory_id);
+CREATE INDEX IF NOT EXISTS idx_inv_trans_type ON inventory_transactions(transaction_type);
+CREATE INDEX IF NOT EXISTS idx_inv_trans_created ON inventory_transactions(created_at);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 12. CSV操作ログ
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS inventory_csv_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_type TEXT NOT NULL CHECK (operation_type IN ('import', 'export')),
+    filename TEXT,
+    record_count INTEGER,
+    status TEXT CHECK (status IN ('success', 'partial', 'failed')),
+    error_message TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_csv_ops_type ON inventory_csv_operations(operation_type);
+CREATE INDEX IF NOT EXISTS idx_csv_ops_created ON inventory_csv_operations(created_at);
 
 -- ═══════════════════════════════════════════════════════════════
 -- 初期データ: デフォルト組織

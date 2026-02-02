@@ -5,7 +5,9 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { pesticideRecordApi, fieldApi, cropApi, gpsApi, pesticideMasterApi } from '../lib/api';
+import { pesticideRecordApi, fieldApi, cropApi, gpsApi, pesticideMasterApi, inventoryApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 /**
  * 画像ファイルからEXIF GPS情報を抽出
@@ -177,6 +179,11 @@ export default function PesticideRecords() {
   const [dilutionCandidates, setDilutionCandidates] = useState([]);
   const [isLoadingDilution, setIsLoadingDilution] = useState(false);
 
+  // 在庫情報用の状態
+  const [inventoryInfo, setInventoryInfo] = useState(null); // { amount, unit, exists }
+  const [isLoadingInventory, setIsLoadingInventory] = useState(false);
+  const [inventoryWarning, setInventoryWarning] = useState(null); // 作成後の警告メッセージ
+
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
   /**
@@ -291,24 +298,33 @@ export default function PesticideRecords() {
   };
 
   /**
-   * 農薬名変更時に希釈倍率候補を取得
+   * 農薬名変更時に希釈倍率候補と在庫情報を取得
    */
   const handlePesticideNameChange = async (name) => {
     setFormData((prev) => ({ ...prev, pesticide_name: name }));
     setDilutionCandidates([]);
+    setInventoryInfo(null);
 
     if (!name || name.length < 2) {
       return;
     }
 
     setIsLoadingDilution(true);
+    setIsLoadingInventory(true);
+
+    // 希釈倍率候補と在庫情報を並列取得
     try {
-      const candidates = await pesticideMasterApi.getDilutionRates(name);
+      const [candidates, invInfo] = await Promise.all([
+        pesticideMasterApi.getDilutionRates(name).catch(() => []),
+        inventoryApi.getByPesticide(name).catch(() => null),
+      ]);
       setDilutionCandidates(candidates || []);
+      setInventoryInfo(invInfo);
     } catch (err) {
-      console.error('Failed to load dilution rates:', err);
+      console.error('Failed to load pesticide info:', err);
     } finally {
       setIsLoadingDilution(false);
+      setIsLoadingInventory(false);
     }
   };
 
@@ -321,6 +337,29 @@ export default function PesticideRecords() {
       dilution_rate: candidate.dilution_rate,
       target_pest: candidate.target_pest || prev.target_pest,
     }));
+  };
+
+  /**
+   * ほ場選択時に輪作計画から作物を自動取得
+   */
+  const handleFieldChange = async (fieldId) => {
+    setFormData((prev) => ({ ...prev, field_id: fieldId }));
+
+    if (!fieldId) return;
+
+    // 輪作計画から当年の作物を取得して自動入力
+    try {
+      const result = await fieldApi.getCurrentCrop(fieldId);
+      if (result.crop) {
+        setFormData((prev) => ({
+          ...prev,
+          field_id: fieldId,
+          crop: result.crop,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to get current crop:', err);
+    }
   };
 
   /**
@@ -452,6 +491,8 @@ export default function PesticideRecords() {
     clearGpsMatch();
     // 希釈倍率候補もクリア
     setDilutionCandidates([]);
+    // 在庫情報もクリア
+    setInventoryInfo(null);
   };
 
   const handleEdit = (record) => {
@@ -494,8 +535,15 @@ export default function PesticideRecords() {
     try {
       if (editingId) {
         await pesticideRecordApi.update(editingId, data);
+        setInventoryWarning(null);
       } else {
-        await pesticideRecordApi.create(data);
+        const result = await pesticideRecordApi.create(data);
+        // 在庫警告チェック
+        if (result.inventory_warning && result.inventory_message) {
+          setInventoryWarning(result.inventory_message);
+        } else {
+          setInventoryWarning(null);
+        }
       }
       resetForm();
       loadRecords();
@@ -556,6 +604,37 @@ export default function PesticideRecords() {
           </button>
         </div>
       </div>
+
+      {/* 在庫警告メッセージ */}
+      {inventoryWarning && (
+        <div
+          style={{
+            padding: '12px 16px',
+            marginBottom: '16px',
+            background: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '8px',
+            color: '#856404',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <span>⚠️ {inventoryWarning}</span>
+          <button
+            onClick={() => setInventoryWarning(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '1.2em',
+              color: '#856404',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {showForm && (
         <div className="modal-overlay">
@@ -681,7 +760,7 @@ export default function PesticideRecords() {
                   <label>ほ場 *</label>
                   <select
                     value={formData.field_id}
-                    onChange={(e) => setFormData({ ...formData, field_id: e.target.value })}
+                    onChange={(e) => handleFieldChange(e.target.value)}
                     required
                   >
                     <option value="">選択してください</option>
@@ -703,14 +782,41 @@ export default function PesticideRecords() {
               <div className="form-row">
                 <div className="form-group">
                   <label>農薬名 *</label>
-                  <input
-                    type="text"
-                    value={formData.pesticide_name}
-                    onChange={(e) => handlePesticideNameChange(e.target.value)}
-                    onBlur={(e) => handlePesticideNameChange(e.target.value)}
-                    placeholder="例: ダコニール1000"
-                    required
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="text"
+                      value={formData.pesticide_name}
+                      onChange={(e) => handlePesticideNameChange(e.target.value)}
+                      onBlur={(e) => handlePesticideNameChange(e.target.value)}
+                      placeholder="例: ダコニール1000"
+                      required
+                      style={{ flex: 1 }}
+                    />
+                    {/* 在庫情報表示 */}
+                    {isLoadingInventory && (
+                      <span style={{ fontSize: '0.85em', color: '#666' }}>📦...</span>
+                    )}
+                    {!isLoadingInventory && inventoryInfo && (
+                      <span
+                        style={{
+                          fontSize: '0.85em',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          whiteSpace: 'nowrap',
+                          background: inventoryInfo.exists
+                            ? (inventoryInfo.amount > 0 ? '#d4edda' : '#fff3cd')
+                            : '#f8f9fa',
+                          color: inventoryInfo.exists
+                            ? (inventoryInfo.amount > 0 ? '#155724' : '#856404')
+                            : '#6c757d',
+                        }}
+                      >
+                        {inventoryInfo.exists
+                          ? `📦 在庫: ${inventoryInfo.amount?.toFixed(1) || 0}${inventoryInfo.unit || ''}`
+                          : '📦 在庫未登録'}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>作物 *</label>
@@ -876,9 +982,9 @@ export default function PesticideRecords() {
       )}
 
       {isLoading ? (
-        <p>読み込み中...</p>
+        <Spinner text="防除記録を読み込み中..." />
       ) : records.length === 0 ? (
-        <p className="empty-message">防除記録がありません</p>
+        <EmptyState message="防除記録がありません" icon="📋" />
       ) : (
         <div className="table-wrapper">
           <table className="data-table">
@@ -936,9 +1042,9 @@ export default function PesticideRecords() {
               />
             </div>
             {isLoadingImages ? (
-              <p>読み込み中...</p>
+              <Spinner text="画像を読み込み中..." size="sm" />
             ) : recordImages.length === 0 ? (
-              <p style={{ color: '#666' }}>画像がありません</p>
+              <EmptyState message="画像がありません" icon="📷" />
             ) : (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                 {recordImages.map((img) => (

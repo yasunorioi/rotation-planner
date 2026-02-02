@@ -3,8 +3,9 @@
  * ユーザーが使用する作物の選択とカスタム名設定
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { cropApi } from '../lib/api';
+import { PageLoading } from '../components/Loading';
 
 export default function CropSettings() {
   const [allCrops, setAllCrops] = useState([]);
@@ -13,12 +14,17 @@ export default function CropSettings() {
   const [customCrops, setCustomCrops] = useState([]); // カスタム作物リスト
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false); // 自動保存中インジケータ
   const [message, setMessage] = useState(null);
 
   // カスタム作物追加用
   const [newCustomParentId, setNewCustomParentId] = useState('');
   const [newCustomName, setNewCustomName] = useState('');
   const [isAddingCustom, setIsAddingCustom] = useState(false);
+
+  // デバウンス用タイマー
+  const saveTimerRef = useRef(null);
+  const pendingCropIdsRef = useRef(null); // 保存待ちのcropIds
 
   useEffect(() => {
     loadData();
@@ -55,10 +61,52 @@ export default function CropSettings() {
     }
   };
 
+  // デバウンス自動保存（500ms）
+  const debouncedSave = useCallback((newCropIds) => {
+    // 既存のタイマーをクリア
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    // 保存待ちデータを更新
+    pendingCropIdsRef.current = newCropIds;
+    setIsAutoSaving(true);
+
+    // 500ms後に保存
+    saveTimerRef.current = setTimeout(async () => {
+      const cropIdsToSave = pendingCropIdsRef.current;
+      if (cropIdsToSave === null) return;
+
+      try {
+        await cropApi.updateUserCrops(cropIdsToSave);
+        setMessage({ type: 'success', text: '自動保存しました' });
+        // 3秒後にメッセージをクリア
+        setTimeout(() => setMessage(null), 3000);
+      } catch (err) {
+        setMessage({ type: 'error', text: '自動保存に失敗しました' });
+      } finally {
+        setIsAutoSaving(false);
+        pendingCropIdsRef.current = null;
+      }
+    }, 500);
+  }, []);
+
+  // コンポーネントアンマウント時にタイマーをクリア
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleCropToggle = (cropId) => {
-    setSelectedCropIds((prev) =>
-      prev.includes(cropId) ? prev.filter((id) => id !== cropId) : [...prev, cropId]
-    );
+    setSelectedCropIds((prev) => {
+      const newIds = prev.includes(cropId) ? prev.filter((id) => id !== cropId) : [...prev, cropId];
+      // デバウンス自動保存を発火
+      debouncedSave(newIds);
+      return newIds;
+    });
   };
 
   const handleSelectAll = () => {
@@ -123,7 +171,7 @@ export default function CropSettings() {
   };
 
   if (isLoading) {
-    return <div className="loading">読み込み中...</div>;
+    return <PageLoading text="作物設定を読み込み中..." />;
   }
 
   return (
@@ -137,7 +185,13 @@ export default function CropSettings() {
           <button onClick={handleDeselectAll} className="btn-secondary">
             全て解除
           </button>
-          <button onClick={handleSave} className="btn-primary" disabled={isSaving}>
+          {isAutoSaving && (
+            <span style={{ color: '#666', fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+              自動保存中...
+            </span>
+          )}
+          <button onClick={handleSave} className="btn-primary" disabled={isSaving || isAutoSaving}>
             {isSaving ? '保存中...' : '保存'}
           </button>
         </div>

@@ -1,13 +1,18 @@
 /**
  * データ管理ページ
- * CSVエクスポート・インポート機能
+ * CSVエクスポート・インポート機能、バックアップ、在庫管理
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { fieldApi, planApi, pesticideRecordApi, cropApi, rotationApi, constraintApi } from '../lib/api';
+import { fieldApi, planApi, pesticideRecordApi, cropApi, rotationApi, constraintApi, inventoryApi, adminApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function DataManagement() {
+  // タブ管理
+  const [activeTab, setActiveTab] = useState('csv');
+
   // エクスポート関連
   const [exportYear, setExportYear] = useState(new Date().getFullYear());
   const [plans, setPlans] = useState([]);
@@ -31,6 +36,27 @@ export default function DataManagement() {
 
   // 制約設定（連作間隔チェック用）
   const [constraints, setConstraints] = useState([]);
+
+  // 在庫管理関連
+  const [inventoryList, setInventoryList] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventorySortBy, setInventorySortBy] = useState('pesticide_name');
+  const [inventorySortOrder, setInventorySortOrder] = useState('asc');
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [editingInventory, setEditingInventory] = useState(null);
+  const [inventoryForm, setInventoryForm] = useState({
+    pesticide_name: '',
+    quantity: '',
+    unit: 'L',
+    storage_location: '',
+    expiry_date: '',
+    notes: '',
+  });
+  const [inventoryImportFile, setInventoryImportFile] = useState(null);
+  const [inventoryImportResult, setInventoryImportResult] = useState(null);
+  const [isInventoryImporting, setIsInventoryImporting] = useState(false);
+  const inventoryCsvInputRef = useRef(null);
 
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
@@ -582,14 +608,208 @@ export default function DataManagement() {
     }
   };
 
+  // =============================================================================
+  // 在庫管理機能
+  // =============================================================================
+
+  const loadInventory = async () => {
+    setInventoryLoading(true);
+    try {
+      const data = await inventoryApi.list({
+        search: inventorySearch,
+        sort_by: inventorySortBy,
+        sort_order: inventorySortOrder,
+      });
+      setInventoryList(Array.isArray(data) ? data : data.items || []);
+    } catch (err) {
+      console.error('Failed to load inventory:', err);
+      // APIが未実装の場合はモックデータを使用
+      setInventoryList([]);
+    } finally {
+      setInventoryLoading(false);
+    }
+  };
+
+  // タブが在庫に切り替わったら読み込み
+  useEffect(() => {
+    if (activeTab === 'inventory') {
+      loadInventory();
+    }
+  }, [activeTab, inventorySearch, inventorySortBy, inventorySortOrder]);
+
+  const resetInventoryForm = () => {
+    setInventoryForm({
+      pesticide_name: '',
+      quantity: '',
+      unit: 'L',
+      storage_location: '',
+      expiry_date: '',
+      notes: '',
+    });
+    setEditingInventory(null);
+    setShowInventoryModal(false);
+  };
+
+  const handleInventoryEdit = (item) => {
+    setInventoryForm({
+      pesticide_name: item.pesticide_name || '',
+      quantity: item.quantity?.toString() || '',
+      unit: item.unit || 'L',
+      storage_location: item.storage_location || '',
+      expiry_date: item.expiry_date || '',
+      notes: item.notes || '',
+    });
+    setEditingInventory(item);
+    setShowInventoryModal(true);
+  };
+
+  const handleInventorySubmit = async (e) => {
+    e.preventDefault();
+    const data = {
+      ...inventoryForm,
+      quantity: parseFloat(inventoryForm.quantity) || 0,
+    };
+
+    try {
+      if (editingInventory) {
+        await inventoryApi.update(editingInventory.id, data);
+      } else {
+        await inventoryApi.create(data);
+      }
+      resetInventoryForm();
+      loadInventory();
+    } catch (err) {
+      alert(err.response?.data?.detail || (editingInventory ? '更新に失敗しました' : '登録に失敗しました'));
+    }
+  };
+
+  const handleInventoryDelete = async (id) => {
+    if (!confirm('この在庫を削除しますか？')) return;
+    try {
+      await inventoryApi.delete(id);
+      loadInventory();
+    } catch (err) {
+      alert('削除に失敗しました');
+    }
+  };
+
+  const handleInventorySort = (column) => {
+    if (inventorySortBy === column) {
+      setInventorySortOrder(inventorySortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setInventorySortBy(column);
+      setInventorySortOrder('asc');
+    }
+  };
+
+  const getSortIcon = (column) => {
+    if (inventorySortBy !== column) return '↕️';
+    return inventorySortOrder === 'asc' ? '↑' : '↓';
+  };
+
+  // 在庫CSVインポート
+  const handleInventoryCsvSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setInventoryImportFile(file);
+      setInventoryImportResult(null);
+    }
+  };
+
+  const handleInventoryCsvImport = async () => {
+    if (!inventoryImportFile) {
+      setInventoryImportResult({ type: 'error', message: 'ファイルを選択してください' });
+      return;
+    }
+
+    setIsInventoryImporting(true);
+    setInventoryImportResult(null);
+
+    try {
+      const result = await inventoryApi.importCsv(inventoryImportFile);
+      setInventoryImportResult({
+        type: 'success',
+        message: `インポート完了: ${result.imported || 0}件登録, ${result.skipped || 0}件スキップ`,
+      });
+      setInventoryImportFile(null);
+      if (inventoryCsvInputRef.current) {
+        inventoryCsvInputRef.current.value = '';
+      }
+      loadInventory();
+    } catch (err) {
+      setInventoryImportResult({
+        type: 'error',
+        message: err.response?.data?.detail || 'インポートに失敗しました',
+      });
+    } finally {
+      setIsInventoryImporting(false);
+    }
+  };
+
+  // 在庫CSVエクスポート
+  const handleInventoryCsvExport = () => {
+    const token = localStorage.getItem('token');
+    const url = inventoryApi.exportCsv();
+    // 認証付きでダウンロード
+    fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('ダウンロード失敗');
+        return res.blob();
+      })
+      .then((blob) => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `inventory_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      })
+      .catch((err) => {
+        alert(err.message || 'CSVエクスポートに失敗しました');
+      });
+  };
+
+  // フィルタリングされた在庫リスト（クライアント側フィルタリング）
+  const filteredInventory = inventoryList.filter((item) =>
+    !inventorySearch || item.pesticide_name?.toLowerCase().includes(inventorySearch.toLowerCase())
+  );
+
   return (
     <div className="data-management-page">
       <div className="page-header">
         <h1>💾 データ管理</h1>
       </div>
 
-      {/* エクスポートセクション */}
-      <div className="section">
+      {/* タブナビゲーション */}
+      <div className="tabs">
+        <button
+          className={`tab ${activeTab === 'csv' ? 'active' : ''}`}
+          onClick={() => setActiveTab('csv')}
+        >
+          📁 CSV操作
+        </button>
+        <button
+          className={`tab ${activeTab === 'backup' ? 'active' : ''}`}
+          onClick={() => setActiveTab('backup')}
+        >
+          💾 バックアップ
+        </button>
+        <button
+          className={`tab ${activeTab === 'inventory' ? 'active' : ''}`}
+          onClick={() => setActiveTab('inventory')}
+        >
+          📦 在庫管理
+        </button>
+      </div>
+
+      {/* CSV操作タブ */}
+      {activeTab === 'csv' && (
+        <>
+          {/* エクスポートセクション */}
+          <div className="section">
         <h2>📥 データエクスポート</h2>
         <p className="section-description">
           各種データをCSV形式でダウンロードできます。
@@ -802,16 +1022,331 @@ export default function DataManagement() {
         )}
       </div>
 
-      {/* 注意事項 */}
-      <div className="section info-section">
-        <h2>ℹ️ 注意事項</h2>
-        <ul>
-          <li>CSVファイルはUTF-8エンコードで保存してください</li>
-          <li>Excelで作成したCSVは「CSV UTF-8」形式で保存してください</li>
-          <li>既存のほ場IDと重複する場合はスキップされます</li>
-          <li>インポート前にバックアップ（エクスポート）を取ることを推奨します</li>
-        </ul>
-      </div>
+          {/* 注意事項 */}
+          <div className="section info-section">
+            <h2>ℹ️ 注意事項</h2>
+            <ul>
+              <li>CSVファイルはUTF-8エンコードで保存してください</li>
+              <li>Excelで作成したCSVは「CSV UTF-8」形式で保存してください</li>
+              <li>既存のほ場IDと重複する場合はスキップされます</li>
+              <li>インポート前にバックアップ（エクスポート）を取ることを推奨します</li>
+            </ul>
+          </div>
+        </>
+      )}
+
+      {/* バックアップタブ */}
+      {activeTab === 'backup' && (
+        <div className="section">
+          <h2>💾 データバックアップ</h2>
+          <p className="section-description">
+            データベース全体のバックアップをダウンロードできます。
+          </p>
+          <div className="backup-actions">
+            <button
+              onClick={async () => {
+                try {
+                  const { blob, filename } = await adminApi.downloadBackup();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = filename;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (err) {
+                  alert('バックアップのダウンロードに失敗しました');
+                }
+              }}
+              className="btn-primary"
+            >
+              📥 バックアップをダウンロード
+            </button>
+          </div>
+          <div className="backup-info" style={{ marginTop: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
+            <h4>バックアップについて</h4>
+            <ul>
+              <li>バックアップファイルはSQLite形式（.db）です</li>
+              <li>すべてのユーザーデータ、ほ場情報、計画、履歴が含まれます</li>
+              <li>定期的にバックアップを取得することを推奨します</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* 在庫管理タブ */}
+      {activeTab === 'inventory' && (
+        <>
+          {/* 在庫編集モーダル */}
+          {showInventoryModal && (
+            <div className="modal-overlay">
+              <div className="modal">
+                <h2>{editingInventory ? '在庫編集' : '在庫追加'}</h2>
+                <form onSubmit={handleInventorySubmit}>
+                  <div className="form-group">
+                    <label>農薬名 <span style={{ color: 'red' }}>*</span></label>
+                    <input
+                      type="text"
+                      value={inventoryForm.pesticide_name}
+                      onChange={(e) => setInventoryForm({ ...inventoryForm, pesticide_name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-row" style={{ display: 'flex', gap: '15px' }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label>在庫量 <span style={{ color: 'red' }}>*</span></label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={inventoryForm.quantity}
+                        onChange={(e) => setInventoryForm({ ...inventoryForm, quantity: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ width: '100px' }}>
+                      <label>単位</label>
+                      <select
+                        value={inventoryForm.unit}
+                        onChange={(e) => setInventoryForm({ ...inventoryForm, unit: e.target.value })}
+                      >
+                        <option value="L">L</option>
+                        <option value="mL">mL</option>
+                        <option value="kg">kg</option>
+                        <option value="g">g</option>
+                        <option value="本">本</option>
+                        <option value="袋">袋</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>保管場所</label>
+                    <input
+                      type="text"
+                      value={inventoryForm.storage_location}
+                      onChange={(e) => setInventoryForm({ ...inventoryForm, storage_location: e.target.value })}
+                      placeholder="例: 倉庫A棚1"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>有効期限</label>
+                    <input
+                      type="date"
+                      value={inventoryForm.expiry_date}
+                      onChange={(e) => setInventoryForm({ ...inventoryForm, expiry_date: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>備考</label>
+                    <textarea
+                      value={inventoryForm.notes}
+                      onChange={(e) => setInventoryForm({ ...inventoryForm, notes: e.target.value })}
+                      rows={2}
+                    />
+                  </div>
+                  <div className="form-actions">
+                    {editingInventory && (
+                      <button
+                        type="button"
+                        onClick={() => handleInventoryDelete(editingInventory.id)}
+                        className="btn-danger"
+                        style={{ marginRight: 'auto' }}
+                      >
+                        🗑️ 削除
+                      </button>
+                    )}
+                    <button type="button" onClick={resetInventoryForm} className="btn-secondary">
+                      キャンセル
+                    </button>
+                    <button type="submit" className="btn-primary">
+                      {editingInventory ? '更新' : '追加'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          <div className="section">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h2>📦 在庫一覧</h2>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => setShowInventoryModal(true)} className="btn-primary">
+                  ＋ 新規追加
+                </button>
+              </div>
+            </div>
+
+            {/* 検索・フィルタ */}
+            <div className="inventory-controls" style={{ marginBottom: '15px', display: 'flex', gap: '15px', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  placeholder="🔍 農薬名で検索..."
+                  value={inventorySearch}
+                  onChange={(e) => setInventorySearch(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px' }}
+                />
+              </div>
+            </div>
+
+            {/* 在庫テーブル */}
+            {inventoryLoading ? (
+              <Spinner text="在庫データを読み込み中..." />
+            ) : filteredInventory.length === 0 ? (
+              <EmptyState
+                message={inventorySearch ? '検索条件に一致する在庫がありません' : '在庫が登録されていません'}
+                icon="📦"
+              />
+            ) : (
+              <div className="table-wrapper">
+                <table className="data-table inventory-table">
+                  <thead>
+                    <tr>
+                      <th onClick={() => handleInventorySort('pesticide_name')} style={{ cursor: 'pointer' }}>
+                        農薬名 {getSortIcon('pesticide_name')}
+                      </th>
+                      <th onClick={() => handleInventorySort('quantity')} style={{ cursor: 'pointer' }}>
+                        在庫量 {getSortIcon('quantity')}
+                      </th>
+                      <th>単位</th>
+                      <th onClick={() => handleInventorySort('storage_location')} style={{ cursor: 'pointer' }}>
+                        保管場所 {getSortIcon('storage_location')}
+                      </th>
+                      <th onClick={() => handleInventorySort('expiry_date')} style={{ cursor: 'pointer' }}>
+                        有効期限 {getSortIcon('expiry_date')}
+                      </th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInventory.map((item) => {
+                      const isExpiringSoon = item.expiry_date && new Date(item.expiry_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                      const isExpired = item.expiry_date && new Date(item.expiry_date) < new Date();
+                      return (
+                        <tr key={item.id} className={isExpired ? 'expired' : isExpiringSoon ? 'expiring-soon' : ''}>
+                          <td>{item.pesticide_name}</td>
+                          <td style={{ textAlign: 'right' }}>{item.quantity}</td>
+                          <td>{item.unit}</td>
+                          <td>{item.storage_location || '-'}</td>
+                          <td>
+                            {item.expiry_date ? (
+                              <span style={{ color: isExpired ? '#d32f2f' : isExpiringSoon ? '#f57c00' : 'inherit' }}>
+                                {item.expiry_date}
+                                {isExpired && ' ⚠️期限切れ'}
+                                {!isExpired && isExpiringSoon && ' ⚠️'}
+                              </span>
+                            ) : '-'}
+                          </td>
+                          <td>
+                            <button onClick={() => handleInventoryEdit(item)} className="btn-icon" title="編集">
+                              ✏️
+                            </button>
+                            <button onClick={() => handleInventoryDelete(item.id)} className="btn-icon btn-danger" title="削除">
+                              🗑️
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* CSV操作セクション */}
+          <div className="section">
+            <h2>📁 在庫CSV操作</h2>
+            <div className="inventory-csv-actions" style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+              {/* エクスポート */}
+              <div className="csv-card" style={{ flex: '1', minWidth: '250px', padding: '20px', background: '#f9f9f9', borderRadius: '8px' }}>
+                <h3>📤 CSVエクスポート</h3>
+                <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '15px' }}>
+                  現在の在庫データをCSV形式でダウンロード
+                </p>
+                <button onClick={handleInventoryCsvExport} className="btn-primary">
+                  ダウンロード
+                </button>
+              </div>
+
+              {/* インポート */}
+              <div className="csv-card" style={{ flex: '1', minWidth: '250px', padding: '20px', background: '#f9f9f9', borderRadius: '8px' }}>
+                <h3>📥 CSVインポート</h3>
+                <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '15px' }}>
+                  CSVファイルから在庫データを一括登録
+                </p>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    ref={inventoryCsvInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleInventoryCsvSelect}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    onClick={handleInventoryCsvImport}
+                    className="btn-primary"
+                    disabled={!inventoryImportFile || isInventoryImporting}
+                  >
+                    {isInventoryImporting ? '処理中...' : 'インポート'}
+                  </button>
+                </div>
+                {inventoryImportResult && (
+                  <div className={`message ${inventoryImportResult.type}`} style={{ marginTop: '10px' }}>
+                    {inventoryImportResult.message}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="csv-format-info" style={{ marginTop: '20px', padding: '15px', background: '#e3f2fd', borderRadius: '8px' }}>
+              <h4>CSVフォーマット</h4>
+              <p style={{ fontSize: '0.9em', color: '#1565c0' }}>
+                カラム: 農薬名, 在庫量, 単位, 保管場所, 有効期限, 備考
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+
+      <style>{`
+        .tabs {
+          display: flex;
+          gap: 5px;
+          margin-bottom: 20px;
+          border-bottom: 2px solid #e0e0e0;
+          padding-bottom: 0;
+        }
+        .tab {
+          padding: 12px 24px;
+          border: none;
+          background: transparent;
+          cursor: pointer;
+          font-size: 1rem;
+          color: #666;
+          border-bottom: 3px solid transparent;
+          margin-bottom: -2px;
+          transition: all 0.2s;
+        }
+        .tab:hover {
+          color: #1976d2;
+          background: #f5f5f5;
+        }
+        .tab.active {
+          color: #1976d2;
+          border-bottom-color: #1976d2;
+          font-weight: 500;
+        }
+        .inventory-table tr.expired {
+          background-color: #ffebee;
+        }
+        .inventory-table tr.expiring-soon {
+          background-color: #fff3e0;
+        }
+        .backup-actions {
+          margin-top: 20px;
+        }
+      `}</style>
     </div>
   );
 }

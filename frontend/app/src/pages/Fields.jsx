@@ -8,6 +8,27 @@ import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFieldStore } from '../store/fieldStore';
 import { fieldApi, cropApi } from '../lib/api';
+import { Spinner, TableSkeleton } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
+
+// 認証付きファイルダウンロード
+const downloadWithAuth = async (url, filename) => {
+  const token = localStorage.getItem('token');
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error('ダウンロードに失敗しました');
+  }
+  const blob = await response.blob();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+};
 
 export default function Fields() {
   const navigate = useNavigate();
@@ -274,6 +295,16 @@ export default function Fields() {
     setEditingCrop('');
   };
 
+  // KMZエクスポート
+  const handleExportKmz = async () => {
+    try {
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      await downloadWithAuth(fieldApi.exportKmz(), `fields_export_${today}.kmz`);
+    } catch (err) {
+      alert(err.message || 'KMZエクスポートに失敗しました');
+    }
+  };
+
   return (
     <div className="fields-page">
       <div className="page-header">
@@ -287,6 +318,9 @@ export default function Fields() {
           </button>
           <button onClick={() => setShowForm(true)} className="btn-primary">
             + 新規ほ場
+          </button>
+          <button onClick={handleExportKmz} className="btn-secondary" title="KMZエクスポート">
+            🌍 KMZ
           </button>
           {selectedFieldIds.size > 0 && (
             <button onClick={handleGoToPesticideOrders} className="btn-primary">
@@ -417,9 +451,9 @@ export default function Fields() {
             </form>
 
             {historyLoading ? (
-              <p>読み込み中...</p>
+              <Spinner text="履歴を読み込み中..." size="sm" />
             ) : history.length === 0 ? (
-              <p className="empty-message">作付履歴がありません</p>
+              <EmptyState message="作付履歴がありません" icon="📅" />
             ) : (
               <table className="data-table">
                 <thead>
@@ -493,9 +527,9 @@ export default function Fields() {
       )}
 
       {isLoading || isLoadingHistory ? (
-        <p>読み込み中...</p>
+        <TableSkeleton rows={5} cols={7} />
       ) : fields.length === 0 ? (
-        <p className="empty-message">ほ場が登録されていません</p>
+        <EmptyState message="ほ場が登録されていません" icon="🗺️" />
       ) : showYearlyView ? (
         /* 年度別マトリクス表示 */
         <div className="yearly-table-wrapper">

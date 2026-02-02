@@ -4,11 +4,17 @@
 
 import { useEffect, useState } from 'react';
 import { planApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
+import { EmptyState } from '../components/ErrorMessage';
 
 export default function Plans() {
   const [plans, setPlans] = useState([]);
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editFormData, setEditFormData] = useState({ name: '' });
+  const [showApplyHistoryModal, setShowApplyHistoryModal] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
 
   useEffect(() => {
     loadPlans();
@@ -48,6 +54,42 @@ export default function Plans() {
     }
   };
 
+  const openEditModal = (plan) => {
+    setEditFormData({ name: plan.name });
+    setShowEditModal(true);
+  };
+
+  const handleUpdatePlan = async (e) => {
+    e.preventDefault();
+    if (!selectedPlan) return;
+
+    try {
+      const updated = await planApi.update(selectedPlan.id, {
+        name: editFormData.name,
+      });
+      setPlans(plans.map((p) => (p.id === updated.id ? { ...p, name: updated.name } : p)));
+      setSelectedPlan({ ...selectedPlan, name: updated.name });
+      setShowEditModal(false);
+    } catch (err) {
+      alert('更新に失敗しました');
+    }
+  };
+
+  // 履歴に反映
+  const handleApplyToHistory = async () => {
+    if (!selectedPlan) return;
+    setIsApplying(true);
+    try {
+      const result = await planApi.applyToHistory(selectedPlan.id);
+      alert(result.message);
+      setShowApplyHistoryModal(false);
+    } catch (err) {
+      alert(err.response?.data?.detail || '履歴への反映に失敗しました');
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
   // 計画詳細をテーブル形式に変換
   const formatPlanDetails = (plan) => {
     if (!plan.details) return null;
@@ -81,13 +123,75 @@ export default function Plans() {
     <div className="plans-page">
       <h1>📋 保存済み計画</h1>
 
+      {/* 履歴反映確認モーダル */}
+      {showApplyHistoryModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h2>⚠️ 作付履歴に反映</h2>
+            <p>
+              計画「<strong>{selectedPlan?.name}</strong>」の内容を作付履歴に反映します。
+            </p>
+            <p style={{ color: '#d32f2f', fontSize: '14px' }}>
+              既存の履歴がある年度・ほ場は上書きされます。この操作は取り消せません。
+            </p>
+            <div className="form-actions">
+              <button
+                type="button"
+                onClick={() => setShowApplyHistoryModal(false)}
+                className="btn-secondary"
+                disabled={isApplying}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyToHistory}
+                className="btn-primary"
+                disabled={isApplying}
+              >
+                {isApplying ? '反映中...' : '反映する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 編集モーダル */}
+      {showEditModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h2>計画名を編集</h2>
+            <form onSubmit={handleUpdatePlan}>
+              <div className="form-group">
+                <label>計画名 *</label>
+                <input
+                  type="text"
+                  value={editFormData.name}
+                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="form-actions">
+                <button type="button" onClick={() => setShowEditModal(false)} className="btn-secondary">
+                  キャンセル
+                </button>
+                <button type="submit" className="btn-primary">
+                  更新
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="plans-layout">
         <div className="plans-list">
           <h2>計画一覧</h2>
           {isLoading ? (
-            <p>読み込み中...</p>
+            <Spinner text="計画を読み込み中..." size="sm" />
           ) : plans.length === 0 ? (
-            <p className="empty-message">保存済みの計画がありません</p>
+            <EmptyState message="保存済みの計画がありません" icon="📋" />
           ) : (
             <ul>
               {plans.map((plan) => (
@@ -116,7 +220,22 @@ export default function Plans() {
         <div className="plan-detail">
           {selectedPlan ? (
             <>
-              <h2>{selectedPlan.name}</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                <h2 style={{ margin: 0 }}>{selectedPlan.name}</h2>
+                <button
+                  onClick={() => openEditModal(selectedPlan)}
+                  className="btn-secondary btn-sm"
+                >
+                  ✏️ 編集
+                </button>
+                <button
+                  onClick={() => setShowApplyHistoryModal(true)}
+                  className="btn-primary btn-sm"
+                  title="計画の内容を作付履歴に登録"
+                >
+                  📅 履歴に反映
+                </button>
+              </div>
               <p>
                 期間: R{selectedPlan.start_year} - R{selectedPlan.end_year}
               </p>
@@ -149,7 +268,7 @@ export default function Plans() {
               )}
             </>
           ) : (
-            <p className="empty-message">計画を選択してください</p>
+            <EmptyState message="計画を選択してください" icon="👈" />
           )}
         </div>
       </div>

@@ -104,7 +104,19 @@ export const fieldApi = {
     const res = await api.post(`/api/fields/${fieldId}/history`, { field_id: fieldId, year, crop });
     return res.data;
   },
+  /**
+   * ほ場の当年作物を輪作計画または作付履歴から取得
+   * @param {number} fieldId - ほ場ID
+   * @param {number} year - 年（省略時は当年）
+   * @returns {Promise<{crop: string|null, source: 'plan'|'history'|null, plan_id: number|null, plan_name: string|null}>}
+   */
+  getCurrentCrop: async (fieldId, year = null) => {
+    const params = year ? { year } : {};
+    const res = await api.get(`/api/fields/${fieldId}/current-crop`, { params });
+    return res.data;
+  },
   exportCsv: () => `${API_BASE}/api/export/fields/csv`,
+  exportKmz: () => `${API_BASE}/api/export/fields/kmz`,
   importKml: async (formData) => {
     const res = await api.post('/api/fields/import-kml', formData, {
       headers: {
@@ -155,10 +167,23 @@ export const planApi = {
     const res = await api.post('/api/plans', data);
     return res.data;
   },
+  update: async (id, data) => {
+    const res = await api.put(`/api/plans/${id}`, data);
+    return res.data;
+  },
   delete: async (id) => {
     await api.delete(`/api/plans/${id}`);
   },
   exportCsv: (id) => `${API_BASE}/api/export/plans/${id}/csv`,
+  /**
+   * 輪作計画を作付履歴に反映
+   * @param {number} id - 計画ID
+   * @returns {Promise<{success: boolean, applied_count: number, message: string}>}
+   */
+  applyToHistory: async (id) => {
+    const res = await api.post(`/api/plans/${id}/apply-to-history`, { confirm_overwrite: true });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -234,6 +259,19 @@ export const pesticideMasterApi = {
     const res = await api.get(`/api/pesticide-masters/by-name/${encodeURIComponent(name)}/dilution-rates`);
     return res.data;
   },
+  /**
+   * CSVファイルから防除マスタを一括インポート
+   * @param {FormData} formData - CSVファイルを含むFormData
+   * @returns {Promise<{imported: number, skipped: number, errors: string[]}>}
+   */
+  importCsv: async (formData) => {
+    const res = await api.post('/api/pesticide-masters/import-csv', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -252,6 +290,10 @@ export const pesticideOrderApi = {
   },
   create: async (data) => {
     const res = await api.post('/api/pesticide-orders', data);
+    return res.data;
+  },
+  update: async (id, data) => {
+    const res = await api.put(`/api/pesticide-orders/${id}`, data);
     return res.data;
   },
   delete: async (id) => {
@@ -334,6 +376,22 @@ export const pesticideRecordApi = {
     await api.delete(`/api/pesticide-records/${recordId}/images/${imageId}`);
   },
   getImageUrl: (recordId, imageId) => `${API_BASE}/api/pesticide-records/${recordId}/images/${imageId}`,
+};
+
+// =============================================================================
+// 在庫管理
+// =============================================================================
+
+export const inventoryApi = {
+  /**
+   * 農薬名で在庫情報を取得
+   * @param {string} pesticideName - 農薬名
+   * @returns {Promise<{pesticide_name: string, amount: number|null, unit: string|null, exists: boolean}>}
+   */
+  getByPesticide: async (pesticideName) => {
+    const res = await api.get('/api/inventory/by-pesticide', { params: { pesticide_name: pesticideName } });
+    return res.data;
+  },
 };
 
 // =============================================================================
@@ -462,6 +520,72 @@ export const adminApi = {
   },
   setFamicAutoUpdate: async (enabled) => {
     const res = await api.put('/api/admin/famic/auto-update', null, { params: { enabled } });
+    return res.data;
+  },
+};
+
+// =============================================================================
+// 在庫管理
+// =============================================================================
+
+export const inventoryApi = {
+  /**
+   * 在庫一覧取得
+   * @param {Object} params - { search, sort_by, sort_order, page, per_page }
+   */
+  list: async (params = {}) => {
+    const res = await api.get('/api/inventory', { params });
+    return res.data;
+  },
+  /**
+   * 在庫詳細取得
+   */
+  get: async (id) => {
+    const res = await api.get(`/api/inventory/${id}`);
+    return res.data;
+  },
+  /**
+   * 在庫新規登録
+   */
+  create: async (data) => {
+    const res = await api.post('/api/inventory', data);
+    return res.data;
+  },
+  /**
+   * 在庫更新
+   */
+  update: async (id, data) => {
+    const res = await api.put(`/api/inventory/${id}`, data);
+    return res.data;
+  },
+  /**
+   * 在庫削除
+   */
+  delete: async (id) => {
+    await api.delete(`/api/inventory/${id}`);
+  },
+  /**
+   * CSVインポート
+   * @param {File} file - CSVファイル
+   */
+  importCsv: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/api/inventory/import-csv', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+  /**
+   * CSVエクスポートURL
+   */
+  exportCsv: () => `${API_BASE}/api/inventory/export-csv`,
+  /**
+   * 在庫履歴（入出庫記録）取得
+   * @param {Object} params - { inventory_id, type, start_date, end_date }
+   */
+  getTransactions: async (params = {}) => {
+    const res = await api.get('/api/inventory/transactions', { params });
     return res.data;
   },
 };

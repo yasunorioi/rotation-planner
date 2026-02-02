@@ -7,6 +7,7 @@ import { useFieldStore } from '../store/fieldStore';
 import { fieldApi, constraintApi, planApi, cropApi, rotationApi } from '../lib/api';
 import { RotationSolver, createDefaultConstraints, generateResultTables } from '../lib/rotationSolver';
 import ConstraintEditor from '../components/ConstraintEditor';
+import { ErrorMessage } from '../components/ErrorMessage';
 
 const DEFAULT_CROPS = ['春小麦', '秋小麦', '大豆', 'デントコーン', 'てんさい', '馬鈴薯'];
 
@@ -26,6 +27,11 @@ export default function Rotation() {
   const [inferUnknown, setInferUnknown] = useState(false);
   const [tensaiRequired, setTensaiRequired] = useState(false);
   const [unknownMode, setUnknownMode] = useState('ignore'); // 'ignore' or 'safe'
+  const [precisionMode, setPrecisionMode] = useState('standard'); // 'standard', 'high', 'max'
+  const [districtGrouping, setDistrictGrouping] = useState(true);
+
+  // 地区フィルター
+  const [selectedDistrict, setSelectedDistrict] = useState('all');
 
   // 過去年を計算（現在の令和年から過去2年）
   const currentReiwaYear = new Date().getFullYear() - 2018;
@@ -207,9 +213,9 @@ export default function Rotation() {
       future_years: futureYearsList,
       constraints: constraints || {},
       options: {
-        timeout: 10,
-        high_precision: false,
-        district_grouping: true,
+        timeout: precisionMode === 'max' ? 180 : precisionMode === 'high' ? 60 : 10,
+        high_precision: precisionMode !== 'standard',
+        district_grouping: districtGrouping,
         infer_unknown: inferUnknown,
         tensai_required: tensaiRequired,
         unknown_mode: unknownMode,
@@ -322,6 +328,50 @@ export default function Rotation() {
 
   const allYears = [...pastYears, ...futureYearsList];
 
+  // 地区リストを取得（結果がある場合）
+  const districts = useMemo(() => {
+    if (!result || !result.fieldTable) return [];
+    const districtSet = new Set();
+    for (const row of result.fieldTable) {
+      if (row.district) {
+        districtSet.add(row.district);
+      }
+    }
+    return Array.from(districtSet).sort();
+  }, [result]);
+
+  // フィルター済みのフィールドテーブル
+  const filteredFieldTable = useMemo(() => {
+    if (!result || !result.fieldTable) return [];
+    if (selectedDistrict === 'all') return result.fieldTable;
+    return result.fieldTable.filter((row) => row.district === selectedDistrict);
+  }, [result, selectedDistrict]);
+
+  // 地区別面積合計（選択中の地区）
+  const districtAreaSummary = useMemo(() => {
+    if (!result || !result.fieldTable) return null;
+    const targetRows = selectedDistrict === 'all' ? result.fieldTable : filteredFieldTable;
+    const totalArea = targetRows.reduce((sum, row) => sum + (row.area_ha || 0), 0);
+    const fieldCount = targetRows.length;
+
+    // 年別・作物別の面積集計
+    const cropAreaByYear = {};
+    for (const year of allYears) {
+      cropAreaByYear[year] = {};
+      for (const crop of crops) {
+        cropAreaByYear[year][crop] = 0;
+      }
+      for (const row of targetRows) {
+        const crop = row[year];
+        if (crop && cropAreaByYear[year][crop] !== undefined) {
+          cropAreaByYear[year][crop] += row.area_ha || 0;
+        }
+      }
+    }
+
+    return { totalArea, fieldCount, cropAreaByYear };
+  }, [result, selectedDistrict, filteredFieldTable, allYears, crops]);
+
   return (
     <div className="rotation-page">
       <h1>🔄 輪作計画</h1>
@@ -371,6 +421,44 @@ export default function Rotation() {
           </div>
         </div>
 
+        {solverType === 'ortools' && (
+          <div className="setting-group">
+            <label>計算精度</label>
+            <div className="radio-group">
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="precisionMode"
+                  value="standard"
+                  checked={precisionMode === 'standard'}
+                  onChange={(e) => setPrecisionMode(e.target.value)}
+                />
+                標準（10秒）
+              </label>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="precisionMode"
+                  value="high"
+                  checked={precisionMode === 'high'}
+                  onChange={(e) => setPrecisionMode(e.target.value)}
+                />
+                高精度（60秒）
+              </label>
+              <label className="radio-label">
+                <input
+                  type="radio"
+                  name="precisionMode"
+                  value="max"
+                  checked={precisionMode === 'max'}
+                  onChange={(e) => setPrecisionMode(e.target.value)}
+                />
+                最高精度（180秒）
+              </label>
+            </div>
+          </div>
+        )}
+
         <div className="setting-group checkbox-group">
           <label className="checkbox-label">
             <input
@@ -388,6 +476,16 @@ export default function Rotation() {
             />
             てんさい必須
           </label>
+          {solverType === 'ortools' && (
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={districtGrouping}
+                onChange={(e) => setDistrictGrouping(e.target.checked)}
+              />
+              地区まとめ優先
+            </label>
+          )}
         </div>
 
         <button
@@ -401,7 +499,7 @@ export default function Rotation() {
 
       <ConstraintEditor crops={crops} onSave={loadConstraints} />
 
-      {error && <div className="error-message">{error}</div>}
+      {error && <ErrorMessage message={error} type="error" onDismiss={() => setError(null)} />}
 
       {result && (
         <div className="result-section">
@@ -440,6 +538,39 @@ export default function Rotation() {
           )}
 
           <h3>ほ場×年 計画表</h3>
+
+          {districts.length > 0 && (
+            <div className="district-filter">
+              <span className="filter-label">地区フィルター:</span>
+              <div className="district-tabs">
+                <button
+                  className={`district-tab ${selectedDistrict === 'all' ? 'active' : ''}`}
+                  onClick={() => setSelectedDistrict('all')}
+                >
+                  全て ({result.fieldTable.length})
+                </button>
+                {districts.map((d) => (
+                  <button
+                    key={d}
+                    className={`district-tab ${selectedDistrict === d ? 'active' : ''}`}
+                    onClick={() => setSelectedDistrict(d)}
+                  >
+                    {d} ({result.fieldTable.filter((r) => r.district === d).length})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {districtAreaSummary && (
+            <div className="district-summary">
+              <span className="summary-item">
+                {selectedDistrict === 'all' ? '全体' : selectedDistrict}:
+                {districtAreaSummary.fieldCount}ほ場 / {districtAreaSummary.totalArea.toFixed(1)}ha
+              </span>
+            </div>
+          )}
+
           <div className="table-wrapper">
             <table className="data-table rotation-table">
               <thead>
@@ -455,7 +586,7 @@ export default function Rotation() {
                 </tr>
               </thead>
               <tbody>
-                {result.fieldTable.map((row, i) => (
+                {filteredFieldTable.map((row, i) => (
                   <tr key={i}>
                     <td>{row.field_code}</td>
                     <td>{row.district || '-'}</td>
@@ -473,7 +604,10 @@ export default function Rotation() {
             </table>
           </div>
 
-          <h3>年別 作物面積(ha)</h3>
+          <h3>
+            年別 作物面積(ha)
+            {selectedDistrict !== 'all' && <span className="subtitle"> - {selectedDistrict}</span>}
+          </h3>
           <div className="table-wrapper">
             <table className="data-table summary-table">
               <thead>
@@ -482,19 +616,43 @@ export default function Rotation() {
                   {crops.map((c) => (
                     <th key={c}>{c}</th>
                   ))}
+                  <th>合計</th>
                 </tr>
               </thead>
               <tbody>
-                {result.summaryTable.map((row, i) => (
-                  <tr key={i}>
-                    <td className={pastYears.includes(row.year) ? 'past-year' : 'future-year'}>
-                      {row.year}
-                    </td>
-                    {crops.map((c) => (
-                      <td key={c}>{parseFloat(row[c]).toFixed(1)}</td>
-                    ))}
-                  </tr>
-                ))}
+                {selectedDistrict === 'all' ? (
+                  result.summaryTable.map((row, i) => (
+                    <tr key={i}>
+                      <td className={pastYears.includes(row.year) ? 'past-year' : 'future-year'}>
+                        {row.year}
+                      </td>
+                      {crops.map((c) => (
+                        <td key={c}>{parseFloat(row[c]).toFixed(1)}</td>
+                      ))}
+                      <td className="total-cell">
+                        {crops.reduce((sum, c) => sum + parseFloat(row[c] || 0), 0).toFixed(1)}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  districtAreaSummary && allYears.map((year, i) => (
+                    <tr key={i}>
+                      <td className={pastYears.includes(year) ? 'past-year' : 'future-year'}>
+                        {year}
+                      </td>
+                      {crops.map((c) => (
+                        <td key={c}>
+                          {(districtAreaSummary.cropAreaByYear[year]?.[c] || 0).toFixed(1)}
+                        </td>
+                      ))}
+                      <td className="total-cell">
+                        {crops.reduce((sum, c) =>
+                          sum + (districtAreaSummary.cropAreaByYear[year]?.[c] || 0), 0
+                        ).toFixed(1)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

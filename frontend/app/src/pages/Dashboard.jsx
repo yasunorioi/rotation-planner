@@ -5,26 +5,54 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { dashboardApi } from '../lib/api';
+import { dashboardApi, planApi } from '../lib/api';
+import { Spinner } from '../components/Loading';
 
 export default function Dashboard() {
   const { user } = useAuthStore();
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentYearPlan, setCurrentYearPlan] = useState(null); // 今年度の計画データ
+
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
-    const loadStats = async () => {
+    const loadData = async () => {
       try {
-        const data = await dashboardApi.getStats();
-        setStats(data);
+        // 統計情報を取得
+        const statsData = await dashboardApi.getStats();
+        setStats(statsData);
+
+        // 最新の輪作計画を取得し、今年度の作付予定を抽出
+        const plans = await planApi.list();
+        if (plans && plans.length > 0) {
+          // 今年度を含む計画を検索
+          for (const planSummary of plans) {
+            if (planSummary.start_year <= currentYear && planSummary.end_year >= currentYear) {
+              const plan = await planApi.get(planSummary.id);
+              if (plan && plan.details) {
+                // 今年度の詳細を抽出
+                const currentYearDetails = plan.details.filter(d => d.year === currentYear);
+                if (currentYearDetails.length > 0) {
+                  setCurrentYearPlan({
+                    id: plan.id,
+                    name: plan.name,
+                    details: currentYearDetails,
+                  });
+                  break;
+                }
+              }
+            }
+          }
+        }
       } catch (err) {
-        console.error('統計情報の取得に失敗しました', err);
+        console.error('データの取得に失敗しました', err);
       } finally {
         setIsLoading(false);
       }
     };
-    loadStats();
-  }, []);
+    loadData();
+  }, [currentYear]);
 
   return (
     <div className="dashboard">
@@ -82,6 +110,31 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 今年度の計画（輪作計画連携） */}
+      <div className="plan-section">
+        <h2>📅 {currentYear}年の作付計画</h2>
+        {currentYearPlan ? (
+          <>
+            <p className="plan-name">
+              計画名: <Link to={`/plans`}>{currentYearPlan.name}</Link>
+            </p>
+            <div className="plan-grid">
+              {currentYearPlan.details.map((detail) => (
+                <div key={`${detail.field_id}-${detail.year}`} className="plan-item">
+                  <span className="plan-field">{detail.field_name || detail.field_code}</span>
+                  <span className="plan-crop">{detail.crop}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="no-plan">
+            <p>今年度の輪作計画がありません</p>
+            <Link to="/rotation" className="btn btn-primary">計画を作成する</Link>
+          </div>
+        )}
+      </div>
+
       {/* 今年度の作付状況 */}
       {stats?.crops && stats.crops.length > 0 && (
         <div className="crops-section">
@@ -123,7 +176,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {isLoading && <p>読み込み中...</p>}
+      {isLoading && <Spinner text="統計情報を読み込み中..." />}
     </div>
   );
 }

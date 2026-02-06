@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS fields (
     area_ha REAL NOT NULL,
     area_a REAL GENERATED ALWAYS AS (area_ha * 100) STORED,
     beet_forbidden INTEGER DEFAULT 0,
+    land_category TEXT DEFAULT NULL,
     coordinates_json TEXT,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -191,3 +192,40 @@ VALUES (1, 'JA北海道', 'JA', '{"region": "北海道", "default_crops": ["春�
 
 INSERT OR IGNORE INTO organizations (id, name, type, settings_json)
 VALUES (2, '個人農家（デフォルト）', 'individual', '{}');
+
+-- ═══════════════════════════════════════════════════════════════
+-- 11. 水田ポリゴン（筆ポリゴン管理）
+--     - 農水省筆ポリゴン取込、KML取込、アプリ描画
+--     - 水田 / 畑地化済み（転作常態化）の区別
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS paddy_polygons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field_id INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+    geometry TEXT NOT NULL,
+    area_ha REAL NOT NULL DEFAULT 0.0,
+    is_converted BOOLEAN NOT NULL DEFAULT 0,
+    conversion_start_year INTEGER,
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('maff', 'kml', 'manual')),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_paddy_polygons_field_id ON paddy_polygons(field_id);
+CREATE INDEX IF NOT EXISTS idx_paddy_polygons_is_converted ON paddy_polygons(is_converted);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 12. 作付けポリゴン（年別・作物別のポリゴン管理）
+--     - 同一ほ場内で作物が混在する場合の管理
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS crop_polygons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field_id INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+    year INTEGER NOT NULL,
+    crop_name TEXT NOT NULL,
+    geometry TEXT NOT NULL,
+    area_ha REAL NOT NULL DEFAULT 0.0,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_crop_polygons_field_id_year ON crop_polygons(field_id, year);

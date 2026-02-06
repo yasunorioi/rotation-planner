@@ -218,7 +218,7 @@ def get_system_info() -> str:
     try:
         import gradio
         info.append(f"  - Gradio: {gradio.__version__}")
-    except:
+    except ImportError as e:
         pass
 
     return "\n".join(info)
@@ -263,7 +263,7 @@ def load_settings() -> Dict[str, Any]:
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, IOError, OSError) as e:
             pass
     return {"debug_mode": False}
 
@@ -365,7 +365,7 @@ def get_fude_files_list() -> List[List[Any]]:
                     data = json.load(f)
                     if data.get("type") == "FeatureCollection":
                         feature_count = len(data.get("features", []))
-            except:
+            except (json.JSONDecodeError, IOError, OSError) as e:
                 pass
 
             files_data.append([
@@ -392,7 +392,7 @@ def get_fude_files_list() -> List[List[Any]]:
                     data = json.load(f)
                     if data.get("type") == "FeatureCollection":
                         feature_count = len(data.get("features", []))
-            except:
+            except (json.JSONDecodeError, IOError, OSError) as e:
                 pass
 
             files_data.append([

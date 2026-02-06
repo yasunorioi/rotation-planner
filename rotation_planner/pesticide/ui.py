@@ -259,7 +259,7 @@ def get_available_years_from_db(plan_id):
             default_year = years[-1]
 
         return gr.update(choices=years, value=default_year)
-    except:
+    except Exception as e:
         return gr.update(choices=[], value=None)
 
 

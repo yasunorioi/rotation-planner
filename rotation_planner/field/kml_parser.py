@@ -270,7 +270,7 @@ def parse_kml_or_kmz(file_path: str) -> List[Dict[str, Any]]:
         # 拡張子不明の場合、まずKMZ（ZIP）として試す
         try:
             return parse_kmz_file(file_path)
-        except:
+        except Exception as e:
             return parse_kml_file(file_path)
 
 
@@ -314,7 +314,7 @@ def parse_kml_or_kmz_bytes(file_bytes: bytes, filename: str) -> List[Dict[str, A
             try:
                 content = file_bytes.decode(encoding)
                 return parse_kml_content(content)
-            except:
+            except (UnicodeDecodeError, Exception) as e:
                 continue
 
     return []

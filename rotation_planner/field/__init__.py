@@ -135,6 +135,21 @@ from .fude_polygon import (
     download_fude_geojson,
 )
 
+# 水田ポリゴンUIモジュール
+from .paddy_ui import (
+    create_paddy_polygon_ui,
+)
+
+# 作付けポリゴンUIモジュール
+from .crop_polygon_ui import (
+    create_crop_polygon_ui,
+)
+
+# 面積集計UIモジュール
+from .aggregation_ui import (
+    create_aggregation_ui,
+)
+
 # 公開API
 __all__ = [
     # KML/KMZパーサー
@@ -203,4 +218,10 @@ __all__ = [
     # ほ場一覧UI
     "create_field_list_ui",
     "get_fields_with_yearly_crops",
+    # 水田ポリゴンUI
+    "create_paddy_polygon_ui",
+    # 作付けポリゴンUI
+    "create_crop_polygon_ui",
+    # 面積集計UI
+    "create_aggregation_ui",
 ]

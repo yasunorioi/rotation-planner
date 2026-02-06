@@ -10,9 +10,17 @@
 """
 
 import sqlite3
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
+
+from rotation_planner.common.exceptions import (
+    DatabaseError, DatabaseConnectionError,
+    DuplicateKeyError, NotNullViolationError, ForeignKeyViolationError
+)
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # 設定
@@ -33,14 +41,22 @@ def get_connection() -> sqlite3.Connection:
 
     Returns:
         sqlite3.Connection: データベース接続
+
+    Raises:
+        DatabaseConnectionError: 接続失敗時
     """
     # ディレクトリが存在しない場合は作成
     DB_DIR.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row  # 辞書形式でアクセス可能
-    conn.execute("PRAGMA foreign_keys = ON")  # 外部キー制約有効化
-    return conn
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+        conn.row_factory = sqlite3.Row  # 辞書形式でアクセス可能
+        conn.execute("PRAGMA foreign_keys = ON")  # 外部キー制約有効化
+        conn.execute("PRAGMA journal_mode = WAL")  # WALモード（書き込み性能向上）
+        return conn
+    except sqlite3.OperationalError as e:
+        logger.error(f"DB connection failed: {e}")
+        raise DatabaseConnectionError(f"Failed to connect to database: {e}")
 
 
 @contextmanager
@@ -59,7 +75,51 @@ def get_db():
         conn.commit()
     except Exception as e:
         conn.rollback()
+        logger.warning(f"Transaction rollback due to error: {e}")
         raise e
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transaction():
+    """
+    明示的なトランザクション管理（エラー分類つき）
+
+    Usage:
+        with transaction() as conn:
+            conn.execute(...)
+            # 自動コミット・分類されたエラー
+
+    Raises:
+        DuplicateKeyError: UNIQUE制約違反
+        NotNullViolationError: NOT NULL制約違反
+        ForeignKeyViolationError: 外部キー制約違反
+        DatabaseError: その他のDBエラー
+    """
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        error_msg = str(e).lower()
+        if "unique" in error_msg:
+            raise DuplicateKeyError(str(e))
+        elif "not null" in error_msg:
+            raise NotNullViolationError(str(e))
+        elif "foreign key" in error_msg:
+            raise ForeignKeyViolationError(str(e))
+        else:
+            raise DatabaseError(str(e))
+    except sqlite3.OperationalError as e:
+        conn.rollback()
+        logger.error(f"DB operational error: {e}")
+        raise DatabaseError(str(e))
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"DB error: {e}")
+        raise DatabaseError(str(e))
     finally:
         conn.close()
 

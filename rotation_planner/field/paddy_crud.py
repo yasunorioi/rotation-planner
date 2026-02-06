@@ -19,8 +19,12 @@ import pandas as pd
 from typing import Tuple, Optional, Any
 
 # DB関連
-from rotation_planner.common.db_access import PaddyPolygonRepository
-from rotation_planner.common import format_success, format_error
+from rotation_planner.common.db_access import PaddyPolygonRepository, FieldRepository
+from rotation_planner.common import (
+    format_success,
+    format_error,
+    format_warning,
+)
 
 # 空間処理
 from rotation_planner.field.spatial import calculate_geodesic_area_ha, geojson_to_shapely
@@ -28,16 +32,8 @@ from rotation_planner.field.spatial import calculate_geodesic_area_ha, geojson_t
 # KMLパーサー
 from rotation_planner.field.kml_parser import parse_kml_or_kmz_bytes
 
-
-# =============================================================================
-# ヘルパー関数
-# =============================================================================
-
-def get_user_id_from_state(state: dict) -> Optional[int]:
-    """stateからユーザーIDを取得"""
-    if not state or 'user_id' not in state:
-        return None
-    return state['user_id']
+# 既存のヘルパー関数を再利用
+from rotation_planner.field.crud import get_user_id_from_state
 
 
 # =============================================================================
@@ -113,6 +109,15 @@ def register_paddy_polygon(
     if not user_id:
         return pd.DataFrame(), format_error("ログインしてください")
 
+    # ほ場が存在するか確認
+    field = FieldRepository.get_field_by_id(field_id)
+    if not field:
+        return get_paddy_polygons_df(state), format_error(f"ほ場ID {field_id} が見つかりません")
+
+    # ユーザーの所有確認
+    if field.get("user_id") != user_id:
+        return get_paddy_polygons_df(state), format_error("このほ場にアクセスする権限がありません")
+
     # GeoJSON解析
     try:
         polygon = geojson_to_shapely(geometry_text)
@@ -157,12 +162,23 @@ def delete_paddy_polygon(state: dict, polygon_id: int) -> Tuple[pd.DataFrame, st
     if not user_id:
         return pd.DataFrame(), format_error("ログインしてください")
 
+    # ポリゴンが存在するか確認
+    polygon = PaddyPolygonRepository.get_by_id(polygon_id)
+    if not polygon:
+        return get_paddy_polygons_df(state), format_warning(f"水田ポリゴン（ID: {polygon_id}）が見つかりません")
+
+    # ほ場の所有確認
+    field_id = polygon.get("field_id")
+    field = FieldRepository.get_field_by_id(field_id)
+    if not field or field.get("user_id") != user_id:
+        return get_paddy_polygons_df(state), format_error("このポリゴンを削除する権限がありません")
+
     try:
         success = PaddyPolygonRepository.delete(polygon_id)
         if success:
             message = format_success(f"水田ポリゴン（ID: {polygon_id}）を削除しました")
         else:
-            message = format_error(f"水田ポリゴン（ID: {polygon_id}）が見つかりません")
+            message = format_error(f"削除に失敗しました")
         return get_paddy_polygons_df(state), message
     except Exception as e:
         return get_paddy_polygons_df(state), format_error(f"削除に失敗しました: {e}")
@@ -190,6 +206,17 @@ def update_paddy_conversion(
     if not user_id:
         return pd.DataFrame(), format_error("ログインしてください")
 
+    # ポリゴンが存在するか確認
+    polygon = PaddyPolygonRepository.get_by_id(polygon_id)
+    if not polygon:
+        return get_paddy_polygons_df(state), format_warning(f"水田ポリゴン（ID: {polygon_id}）が見つかりません")
+
+    # ほ場の所有確認
+    field_id = polygon.get("field_id")
+    field = FieldRepository.get_field_by_id(field_id)
+    if not field or field.get("user_id") != user_id:
+        return get_paddy_polygons_df(state), format_error("このポリゴンを更新する権限がありません")
+
     try:
         success = PaddyPolygonRepository.update(
             polygon_id,
@@ -200,7 +227,7 @@ def update_paddy_conversion(
             status = '畑地化済' if is_converted else '水田'
             message = format_success(f"水田ポリゴン（ID: {polygon_id}）を更新しました（地目: {status}）")
         else:
-            message = format_error(f"水田ポリゴン（ID: {polygon_id}）が見つかりません")
+            message = format_error(f"更新に失敗しました")
         return get_paddy_polygons_df(state), message
     except Exception as e:
         return get_paddy_polygons_df(state), format_error(f"更新に失敗しました: {e}")
@@ -230,6 +257,15 @@ def import_paddy_from_kml(
     if not user_id:
         return pd.DataFrame(), format_error("ログインしてください")
 
+    # ほ場が存在するか確認
+    field = FieldRepository.get_field_by_id(field_id)
+    if not field:
+        return get_paddy_polygons_df(state), format_error(f"ほ場ID {field_id} が見つかりません")
+
+    # ユーザーの所有確認
+    if field.get("user_id") != user_id:
+        return get_paddy_polygons_df(state), format_error("このほ場にアクセスする権限がありません")
+
     # ファイル読み込み
     try:
         file_bytes = file.read()
@@ -253,13 +289,22 @@ def import_paddy_from_kml(
     for field_data in parsed_fields:
         try:
             # 座標を GeoJSON に変換
-            coordinates = field_data.get('coordinates', [])
-            if not coordinates:
+            # KMLパーサーが返す座標は [[lat, lng], ...] 形式
+            # GeoJSONは [[[lng, lat], ...]] 形式なので変換が必要
+            coords_latlng = field_data.get('coordinates', [])
+            if not coords_latlng or len(coords_latlng) < 3:
                 continue
+
+            # [lat, lng] → [lng, lat] に変換
+            coords_lnglat = [[coord[1], coord[0]] for coord in coords_latlng]
+
+            # ポリゴンを閉じる（最初と最後が同じでなければ）
+            if coords_lnglat[0] != coords_lnglat[-1]:
+                coords_lnglat.append(coords_lnglat[0])
 
             geojson_obj = {
                 "type": "Polygon",
-                "coordinates": [coordinates]
+                "coordinates": [coords_lnglat]
             }
             geometry_text = json.dumps(geojson_obj)
 
@@ -280,7 +325,7 @@ def import_paddy_from_kml(
             count += 1
 
         except Exception as e:
-            errors.append(f"ポリゴン登録エラー: {e}")
+            errors.append(f"{field_data.get('name', '不明')}: {str(e)}")
 
     # 結果メッセージ
     if count > 0:

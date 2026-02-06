@@ -289,6 +289,100 @@ def merge_paddy_polygons(geojson_list: list[str]) -> str:
 
 
 # =============================================================================
+# 隣接判定関数
+# =============================================================================
+
+def _meters_to_degrees(meters: float, latitude: float = 43.0) -> float:
+    """
+    メートルを度に概算変換（北緯43度付近）
+
+    Args:
+        meters: 距離（メートル）
+        latitude: 基準緯度（デフォルト: 43度 = 北海道）
+
+    Returns:
+        概算の度数
+    """
+    import math
+    # 緯度方向: 1度 ≈ 111,320m
+    # 経度方向: 1度 ≈ 111,320m × cos(lat)
+    # 平均を取って概算（バッファは等方的なので）
+    lat_m_per_deg = 111320.0
+    lng_m_per_deg = 111320.0 * math.cos(math.radians(latitude))
+    avg_m_per_deg = (lat_m_per_deg + lng_m_per_deg) / 2.0
+    return meters / avg_m_per_deg
+
+
+def build_adjacency_graph(
+    fields: list[dict],
+    buffer_meters: float = 1.0
+) -> dict[str, list[str]]:
+    """
+    ほ場ポリゴンから隣接グラフ（隣接リスト）を構築。
+
+    Args:
+        fields: ほ場リスト。各dictは {'field_code': str, 'coordinates_json': str}
+                coordinates_jsonは [[lat, lng], ...] 形式のJSON文字列
+        buffer_meters: バッファ距離（メートル）。この距離以内なら隣接と判定
+
+    Returns:
+        {field_code: [隣接field_code, ...]} の隣接リスト
+    """
+    # 座標ありのほ場のみ処理
+    valid_fields = []
+    for f in fields:
+        coords_json = f.get('coordinates_json')
+        if not coords_json:
+            continue
+        try:
+            coords = json.loads(coords_json) if isinstance(coords_json, str) else coords_json
+            if len(coords) >= 3:
+                poly = coords_to_shapely(coords)
+                valid_fields.append((f['field_code'], poly))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+
+    buf_deg = _meters_to_degrees(buffer_meters)
+
+    # 隣接リスト構築
+    adjacency: dict[str, list[str]] = {code: [] for code, _ in valid_fields}
+
+    for i in range(len(valid_fields)):
+        code_a, poly_a = valid_fields[i]
+        buffered_a = poly_a.buffer(buf_deg)
+        for j in range(i + 1, len(valid_fields)):
+            code_b, poly_b = valid_fields[j]
+            if buffered_a.intersects(poly_b):
+                adjacency[code_a].append(code_b)
+                adjacency[code_b].append(code_a)
+
+    return adjacency
+
+
+def get_adjacent_field_pairs(
+    fields: list[dict],
+    buffer_meters: float = 1.0
+) -> list[tuple[str, str]]:
+    """
+    隣接ほ場ペアリスト返却（重複なし）。
+
+    Args:
+        fields: ほ場リスト。各dictは {'field_code': str, 'coordinates_json': str}
+        buffer_meters: バッファ距離（メートル）
+
+    Returns:
+        [(field_code_a, field_code_b), ...] の隣接ペアリスト
+    """
+    graph = build_adjacency_graph(fields, buffer_meters)
+    pairs = set()
+    for code, neighbors in graph.items():
+        for neighbor in neighbors:
+            pair = tuple(sorted([code, neighbor]))
+            pairs.add(pair)
+    return list(pairs)
+
+
+# =============================================================================
 # エクスポート
 # =============================================================================
 
@@ -301,4 +395,6 @@ __all__ = [
     'determine_land_category',
     'split_crop_by_land_category',
     'merge_paddy_polygons',
+    'build_adjacency_graph',
+    'get_adjacent_field_pairs',
 ]

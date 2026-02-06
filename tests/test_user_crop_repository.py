@@ -23,6 +23,7 @@ def setup_crop_tables(test_db):
             CREATE TABLE IF NOT EXISTS crop_master (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
+                family TEXT DEFAULT NULL,
                 display_order INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

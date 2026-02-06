@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS crop_master;
 CREATE TABLE crop_master (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    family TEXT DEFAULT NULL,
     display_order INTEGER DEFAULT 0,
     is_active INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -27,11 +28,11 @@ CREATE TABLE user_crops (
 );
 
 -- 初期作物データ
-INSERT INTO crop_master (name, display_order) VALUES ('春小麦', 1);
-INSERT INTO crop_master (name, display_order) VALUES ('秋小麦', 2);
-INSERT INTO crop_master (name, display_order) VALUES ('大豆', 3);
-INSERT INTO crop_master (name, display_order) VALUES ('てんさい', 4);
-INSERT INTO crop_master (name, display_order) VALUES ('馬鈴薯', 5);
+INSERT INTO crop_master (name, family, display_order) VALUES ('春小麦', 'イネ科', 1);
+INSERT INTO crop_master (name, family, display_order) VALUES ('秋小麦', 'イネ科', 2);
+INSERT INTO crop_master (name, family, display_order) VALUES ('大豆', 'マメ科', 3);
+INSERT INTO crop_master (name, family, display_order) VALUES ('てんさい', 'アカザ科', 4);
+INSERT INTO crop_master (name, family, display_order) VALUES ('馬鈴薯', 'ナス科', 5);
 
 -- 確認
 SELECT '=== crop_master ===' AS info;

@@ -1180,13 +1180,40 @@ class CropMasterRepository:
             return row_to_dict(cursor.fetchone())
 
     @staticmethod
-    def create(name: str, display_order: int = 0) -> int:
+    def get_family_map() -> Dict[str, str]:
+        """作物名→科名マッピング取得。UserCropも解決。
+
+        Returns:
+            {作物名: 科名} の辞書。familyがNULLの作物は除外。
+        """
+        with get_db() as conn:
+            # crop_masterから直接取得
+            cursor = conn.execute("""
+                SELECT name, family FROM crop_master
+                WHERE family IS NOT NULL AND is_active = 1
+            """)
+            family_map = {row['name']: row['family'] for row in cursor.fetchall()}
+
+            # UserCropのcustom_nameも解決（親のfamilyを引き継ぐ）
+            cursor = conn.execute("""
+                SELECT uc.custom_name, cm.family
+                FROM user_crops uc
+                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
+                WHERE uc.custom_name IS NOT NULL AND cm.family IS NOT NULL
+            """)
+            for row in cursor.fetchall():
+                family_map[row['custom_name']] = row['family']
+
+            return family_map
+
+    @staticmethod
+    def create(name: str, display_order: int = 0, family: str = None) -> int:
         """作物を追加"""
         with get_db() as conn:
             cursor = conn.execute("""
-                INSERT INTO crop_master (name, display_order)
-                VALUES (?, ?)
-            """, (name, display_order))
+                INSERT INTO crop_master (name, family, display_order)
+                VALUES (?, ?, ?)
+            """, (name, family, display_order))
             conn.commit()
             return cursor.lastrowid
 
@@ -1196,7 +1223,7 @@ class CropMasterRepository:
         with get_db() as conn:
             fields = []
             values = []
-            for key in ['name', 'display_order', 'is_active']:
+            for key in ['name', 'family', 'display_order', 'is_active']:
                 if key in data:
                     fields.append(f"{key} = ?")
                     values.append(data[key])

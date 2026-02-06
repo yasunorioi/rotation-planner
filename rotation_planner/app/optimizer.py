@@ -88,13 +88,35 @@ class RotationPlannerHeuristic:
 
         return True
 
+    def check_adjacency_constraint(self, field_idx: int, year: str, crop: str, plan: Dict) -> bool:
+        """隣接筆の同一科制約をチェック"""
+        if not self.constraints.adjacent_family_enabled:
+            return True
+        family = self.constraints.crop_family_map.get(crop)
+        if not family:
+            return True
+        for fi, fj in self.constraints.adjacency_pairs:
+            neighbor_idx = None
+            if fi == field_idx:
+                neighbor_idx = fj
+            elif fj == field_idx:
+                neighbor_idx = fi
+            if neighbor_idx is not None:
+                neighbor_crop = plan.get((neighbor_idx, year))
+                if neighbor_crop:
+                    neighbor_family = self.constraints.crop_family_map.get(neighbor_crop)
+                    if neighbor_family == family:
+                        return False
+        return True
+
     def get_valid_crops(self, field_idx: int, year: str, plan: Dict) -> List[str]:
         """有効な作物リストを取得"""
         valid = []
         for crop in self.crops:
             if self.check_gap_constraint(field_idx, year, crop, plan):
                 if self.check_transition_constraint(field_idx, year, crop, plan):
-                    valid.append(crop)
+                    if self.check_adjacency_constraint(field_idx, year, crop, plan):
+                        valid.append(crop)
         return valid
 
     def calculate_year_stats(self, year: str, plan: Dict) -> Dict[str, Tuple[float, int]]:
@@ -523,6 +545,33 @@ class RotationPlannerORTools:
                     if potato_idx is not None:
                         model.Add(x[f_idx, y, potato_idx] == 0)
 
+        # 制約10: 隣接筆の同一科禁止（PRO機能 - ソフト制約）
+        PENALTY_ADJACENT_FAMILY = 200000
+        adj_over = {}
+        if self.constraints.adjacent_family_enabled and self.constraints.adjacency_pairs:
+            # 科→作物インデックスリストを構築
+            family_to_crop_indices: dict[str, list[int]] = {}
+            for crop_name, family in self.constraints.crop_family_map.items():
+                c_idx = self.crop_to_idx.get(crop_name)
+                if c_idx is not None:
+                    family_to_crop_indices.setdefault(family, []).append(c_idx)
+
+            for pair_idx, (fi, fj) in enumerate(self.constraints.adjacency_pairs):
+                if fi >= self.num_fields or fj >= self.num_fields:
+                    continue
+                for y in range(self.num_future_years):
+                    for family, crop_indices in family_to_crop_indices.items():
+                        if len(crop_indices) < 1:
+                            continue
+                        # sum_fi = ほ場fiでこの科に属する作物が選ばれている数（0 or 1）
+                        sum_fi = sum(x[fi, y, c] for c in crop_indices)
+                        sum_fj = sum(x[fj, y, c] for c in crop_indices)
+                        # both_same = 両方がこの科 → sum_fi + sum_fj >= 2
+                        over_var = model.NewIntVar(
+                            0, 1, f'adj_over_{pair_idx}_{y}_{family}')
+                        model.Add(over_var >= sum_fi + sum_fj - 1)
+                        adj_over[pair_idx, y, family] = over_var
+
         # 目的関数
         area_cy = {}
         for c in range(self.num_crops):
@@ -565,6 +614,8 @@ class RotationPlannerORTools:
             objective.append(PENALTY_FIELD_OVER * var)
         for key, var in field_under.items():
             objective.append(PENALTY_FIELD_UNDER * var)
+        for key, var in adj_over.items():
+            objective.append(PENALTY_ADJACENT_FAMILY * var)
 
         for diff in diffs:
             objective.append(diff)
@@ -651,6 +702,15 @@ class RotationPlannerORTools:
                     year_name = self.future_years[y]
                     errors.append(f"⚠️ 警告: {year_name}の{crop_name}がほ場数下限を{under_val}不足")
 
+            for (pair_idx, y, family), var in adj_over.items():
+                over_val = solver.Value(var)
+                if over_val > 0:
+                    fi, fj = self.constraints.adjacency_pairs[pair_idx]
+                    field1 = self.fields[fi].field_id if fi < len(self.fields) else f"F{fi}"
+                    field2 = self.fields[fj].field_id if fj < len(self.fields) else f"F{fj}"
+                    year_name = self.future_years[y]
+                    errors.append(f"⚠️ 警告: {year_name}に{field1}と{field2}で同一科({family})")
+
             return plan, -total_diff, errors
         else:
             return self.heuristic.solve()
@@ -733,7 +793,10 @@ def run_sensitivity_analysis(fields: List[Field], past_years: List[str],
             forbidden_transitions=set(base_constraints.forbidden_transitions),
             preferred_transitions=dict(base_constraints.preferred_transitions),
             main_crops=list(base_constraints.main_crops),
-            unknown_mode=base_constraints.unknown_mode
+            unknown_mode=base_constraints.unknown_mode,
+            adjacent_family_enabled=base_constraints.adjacent_family_enabled,
+            adjacency_pairs=list(base_constraints.adjacency_pairs),
+            crop_family_map=dict(base_constraints.crop_family_map),
         )
 
         crop = relax['crop']
@@ -782,6 +845,7 @@ def run_sensitivity_analysis(fields: List[Field], past_years: List[str],
 def run_optimization(n_years, crop_text, constraints_table,
                     forbidden_text, preferred_text, main_crops_text, unknown_mode,
                     tensai_required, precision_mode, infer_unknown_flag, district_grouping,
+                    adjacent_family_enabled,
                     fields: List[Field], past_years: List[str]):
     """最適化を実行
 
@@ -797,6 +861,7 @@ def run_optimization(n_years, crop_text, constraints_table,
         precision_mode: 計算精度
         infer_unknown_flag: 空欄推論フラグ
         district_grouping: 地区まとめフラグ
+        adjacent_family_enabled: 隣接筆の同一科制約フラグ（PRO機能）
         fields: ほ場リスト
         past_years: 過去年リスト
     """
@@ -837,6 +902,46 @@ def run_optimization(n_years, crop_text, constraints_table,
     # unknown_mode
     unk_mode = "safe" if "安全側" in unknown_mode else "ignore"
 
+    # PRO: 隣接筆の同一科制約
+    adjacency_pairs_idx = []
+    crop_family_map = {}
+    if adjacent_family_enabled:
+        try:
+            from rotation_planner.common import CropMasterRepository
+            from rotation_planner.common.db_access import get_db
+            from rotation_planner.field.spatial import get_adjacent_field_pairs
+
+            # 作物→科マッピング取得
+            crop_family_map = CropMasterRepository.get_family_map()
+
+            # ほ場のfield_idリストを取得（fieldsはField dataclass）
+            field_id_to_idx = {f.field_id: i for i, f in enumerate(fields)}
+
+            # ほ場の座標データ取得（DBから全ほ場を取得）
+            # field_idはDB上のfield_codeに対応
+            all_db_fields = []
+            with get_db() as conn:
+                field_ids = list(field_id_to_idx.keys())
+                placeholders = ','.join('?' * len(field_ids))
+                cursor = conn.execute(f"""
+                    SELECT field_code, coordinates_json FROM fields
+                    WHERE field_code IN ({placeholders})
+                """, field_ids)
+                all_db_fields = [dict(row) for row in cursor.fetchall()]
+
+            # 隣接ペア取得
+            adj_pairs = get_adjacent_field_pairs(all_db_fields)
+
+            # field_code→field_indexに変換
+            for code_a, code_b in adj_pairs:
+                idx_a = field_id_to_idx.get(code_a)
+                idx_b = field_id_to_idx.get(code_b)
+                if idx_a is not None and idx_b is not None:
+                    adjacency_pairs_idx.append((idx_a, idx_b))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"隣接制約の構築に失敗: {e}")
+
     constraints = Constraints(
         crop_mins=crop_mins,
         crop_caps=crop_caps,
@@ -846,7 +951,10 @@ def run_optimization(n_years, crop_text, constraints_table,
         forbidden_transitions=forbidden,
         preferred_transitions=preferred,
         main_crops=main_crops,
-        unknown_mode=unk_mode
+        unknown_mode=unk_mode,
+        adjacent_family_enabled=adjacent_family_enabled,
+        adjacency_pairs=adjacency_pairs_idx,
+        crop_family_map=crop_family_map,
     )
 
     # 最適化実行

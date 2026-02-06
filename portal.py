@@ -384,6 +384,13 @@ def create_app():
                         infer_unknown = gr.Checkbox(value=True, label="空欄を推論で補完（*マーク付き）")
                         district_grouping = gr.Checkbox(value=True, label="地区まとめを優先")
 
+                        gr.Markdown("### PRO機能")
+                        adjacent_family_enabled = gr.Checkbox(
+                            value=False,
+                            label="[PRO] 隣接筆の同一科制約",
+                            info="隣接するほ場に同じ科の作物を配置しないよう制約を追加"
+                        )
+
                         gr.Markdown("## 🌱 作物マスター")
                         crop_text = gr.Textbox(
                             value="",  # ログイン後に動的に設定
@@ -523,6 +530,7 @@ def create_app():
                     inputs=[n_years, crop_text, constraints_table,
                             forbidden_text, preferred_text, main_crops_text, unknown_mode,
                             tensai_required, precision_mode, infer_unknown, district_grouping,
+                            adjacent_family_enabled,
                             fields_state, past_years_state],
                     outputs=[result_table, summary_table, csv_download, message_box_rotation]
                 )

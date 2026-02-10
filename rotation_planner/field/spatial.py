@@ -18,6 +18,8 @@ from shapely.geometry import shape, mapping, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from pyproj import Geod
 
+from rotation_planner.common.models import LandCategory
+
 
 # =============================================================================
 # 座標変換関数
@@ -257,8 +259,6 @@ def determine_land_category(
     Returns:
         [(polygon, LandCategory, area_ha, conversion_start_year|None), ...] のリスト
     """
-    from rotation_planner.common.models import LandCategory
-
     result = []
     remaining_geom = crop_geom
 
@@ -338,4 +338,5 @@ __all__ = [
     'get_adjacent_field_pairs',
     'determine_land_category',
     'split_crop_by_land_category',
+    'LandCategory',
 ]

@@ -177,7 +177,7 @@ class TestDetermineLandCategory:
         ]
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = [cat for _, cat, _ in parts]
+        categories = [cat for _, cat, _, _ in parts]
 
         assert len(parts) >= 1
         assert all(c == LandCategory.PADDY for c in categories)
@@ -190,7 +190,7 @@ class TestDetermineLandCategory:
         ]
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = [cat for _, cat, _ in parts]
+        categories = [cat for _, cat, _, _ in parts]
 
         assert len(parts) >= 1
         assert all(c == LandCategory.CONVERTED for c in categories)
@@ -203,7 +203,7 @@ class TestDetermineLandCategory:
         ]
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = [cat for _, cat, _ in parts]
+        categories = [cat for _, cat, _, _ in parts]
 
         assert len(parts) >= 1
         assert all(c == LandCategory.FIELD for c in categories)
@@ -216,7 +216,7 @@ class TestDetermineLandCategory:
         ]
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = set(cat for _, cat, _ in parts)
+        categories = set(cat for _, cat, _, _ in parts)
 
         assert LandCategory.PADDY in categories
         assert LandCategory.FIELD in categories
@@ -229,7 +229,7 @@ class TestDetermineLandCategory:
         ]
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = set(cat for _, cat, _ in parts)
+        categories = set(cat for _, cat, _, _ in parts)
 
         assert LandCategory.CONVERTED in categories
         assert LandCategory.FIELD in categories
@@ -240,7 +240,7 @@ class TestDetermineLandCategory:
         paddy_polygons = []
 
         parts = determine_land_category(crop_geom, paddy_polygons)
-        categories = [cat for _, cat, _ in parts]
+        categories = [cat for _, cat, _, _ in parts]
 
         assert len(parts) >= 1
         assert all(c == LandCategory.FIELD for c in categories)

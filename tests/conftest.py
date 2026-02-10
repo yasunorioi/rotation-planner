@@ -30,6 +30,17 @@ os.close(_test_db_fd)
 import rotation_planner.common.db_access as _db_mod
 _db_mod.DB_PATH = Path(_shared_test_db_path)
 
+# db モジュールの DB_PATH も差し替え＆スキーマ初期化
+from rotation_planner.common import db as _db_mod2
+_db_mod2.DB_PATH = Path(_shared_test_db_path)
+_schema_path = Path(__file__).parent.parent / "db_schema.sql"
+if _schema_path.exists():
+    _conn = sqlite3.connect(_shared_test_db_path)
+    with open(_schema_path, 'r', encoding='utf-8') as _f:
+        _conn.executescript(_f.read())
+    _conn.close()
+    _db_mod2.init_db()
+
 
 # ============================================================
 # pytest マーカー定義

@@ -36,6 +36,15 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
+    # ダミー定義（関数シグネチャのためにモジュールレベルで必要）
+    class _DummyColors:
+        grey = None
+        whitesmoke = None
+        white = None
+        @staticmethod
+        def HexColor(v): return None
+    colors = _DummyColors()
+    Table = None
 
 
 # =============================================================================
@@ -228,8 +237,10 @@ def generate_pesticide_order_pdf(
         return ""
 
 
-def _create_table(df: pd.DataFrame, font_name: str, header_color=colors.grey) -> Table:
+def _create_table(df: pd.DataFrame, font_name: str, header_color=None) -> Table:
     """DataFrameからreportlabのTableを作成"""
+    if header_color is None:
+        header_color = colors.grey
 
     # ヘッダー行
     headers = list(df.columns)

@@ -4,6 +4,7 @@
 Usage:
     from rotation_planner.field.aggregation_service import (
         get_cross_tabulation_for_user,
+        copy_crop_polygons_to_next_year,
         get_subsidy_summary,
         export_cross_tabulation_csv,
         build_land_breakdown_for_crop,
@@ -112,6 +113,29 @@ def get_cross_tabulation_for_user(
     display_df = format_cross_table_for_display(raw_df)
 
     return raw_df, display_df
+
+
+# =============================================================================
+# copy_crop_polygons_to_next_year
+# =============================================================================
+
+def copy_crop_polygons_to_next_year(user_id: int, from_year: int, to_year: int) -> Tuple[int, str]:
+    """
+    前年度の作付けポリゴンを次年度にコピー。
+
+    Returns:
+        (コピー件数, メッセージ文字列)
+    """
+    count = CropPolygonRepository.copy_from_previous_year(user_id, from_year, to_year)
+
+    if count > 0:
+        message = f"{from_year}年度の作付けポリゴン{count}件を{to_year}年度にコピーしました"
+    else:
+        message = f"{from_year}年度に作付けポリゴンが存在しないため、コピーできませんでした"
+
+    logger.info(f"copy_crop_polygons_to_next_year: user_id={user_id}, {from_year}→{to_year}, count={count}")
+
+    return count, message
 
 
 # =============================================================================

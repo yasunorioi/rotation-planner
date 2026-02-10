@@ -15,6 +15,8 @@ export default function ConstraintEditor({ crops = DEFAULT_CROPS, onSave }) {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [adjacentFamilyEnabled, setAdjacentFamilyEnabled] = useState(false);
+  const [adjacencyBufferMeters, setAdjacencyBufferMeters] = useState(1.0);
 
   // 初期データ読み込み
   useEffect(() => {
@@ -62,6 +64,8 @@ export default function ConstraintEditor({ crops = DEFAULT_CROPS, onSave }) {
       setForbiddenTransitions(data.forbidden_transitions || '');
       setPreferredTransitions(data.preferred_transitions || '');
       setMainCrops(data.main_crops || '');
+      setAdjacentFamilyEnabled(data.adjacent_family_enabled || false);
+      setAdjacencyBufferMeters(data.adjacency_buffer_meters || 1.0);
     } catch {
       initializeConstraints(crops);
     }
@@ -87,6 +91,8 @@ export default function ConstraintEditor({ crops = DEFAULT_CROPS, onSave }) {
         forbidden_transitions: forbiddenTransitions,
         preferred_transitions: preferredTransitions,
         main_crops: mainCrops,
+        adjacent_family_enabled: adjacentFamilyEnabled,
+        adjacency_buffer_meters: adjacencyBufferMeters,
       });
       setMessage({ type: 'success', text: '制約設定を保存しました' });
       if (onSave) onSave();
@@ -231,6 +237,40 @@ export default function ConstraintEditor({ crops = DEFAULT_CROPS, onSave }) {
               />
               <p className="help-text">カンマ区切りで指定。毎年必ず作付けされる作物です。</p>
             </div>
+          </div>
+
+          <div className="constraint-section">
+            <h4>🔒 PRO: 隣接筆制約</h4>
+            <div className="form-group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={adjacentFamilyEnabled}
+                  onChange={(e) => setAdjacentFamilyEnabled(e.target.checked)}
+                />
+                隣接ほ場に同じ科の作物を配置しない
+              </label>
+              <p className="help-text">
+                同じ「科」の作物が隣接するほ場に配置されないよう制約します（連作障害防止）。
+              </p>
+            </div>
+            {adjacentFamilyEnabled && (
+              <div className="form-group">
+                <label>隣接判定バッファ距離（メートル）</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={adjacencyBufferMeters}
+                  onChange={(e) => setAdjacencyBufferMeters(parseFloat(e.target.value) || 1.0)}
+                  placeholder="1.0"
+                  style={{ width: '100px' }}
+                />
+                <p className="help-text">
+                  ほ場間の距離がこの値以内なら隣接と判定します。デフォルト: 1.0m
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="constraint-actions">

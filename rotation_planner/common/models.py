@@ -292,3 +292,37 @@ class PesticideOrder:
     status: str = "draft"  # draft, submitted, approved
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# =============================================================================
+# 地目区分
+# =============================================================================
+
+class LandCategory(Enum):
+    """地目"""
+    FIELD = "畑"
+    CONVERTED = "畑地化済"
+    PADDY = "水田"
+    UNKNOWN = "不明"
+
+    @property
+    def display_name(self) -> str:
+        return self.value
+
+
+# =============================================================================
+# 面積集計行
+# =============================================================================
+
+@dataclass
+class AggregationRow:
+    """集計表の1行（1作物の地目別面積）"""
+    crop_name: str
+    field_area_ha: float  # 畑
+    converted_areas: Dict[Any, float]  # {year_or_'unknown': area_ha}
+    paddy_area_ha: float  # 水田
+
+    @property
+    def total_area(self) -> float:
+        """合計面積"""
+        return self.field_area_ha + sum(self.converted_areas.values()) + self.paddy_area_ha

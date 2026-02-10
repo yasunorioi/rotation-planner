@@ -1034,6 +1034,7 @@ def ensure_crop_tables():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
                     category TEXT,
+                    family TEXT DEFAULT NULL,
                     display_order INTEGER DEFAULT 0,
                     is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1041,22 +1042,22 @@ def ensure_crop_tables():
             """)
             # 初期データ投入（FAMIC表記に準拠）
             initial_crops = [
-                ('小麦(春播)', '穀物', 1),
-                ('小麦(秋播)', '穀物', 2),
-                ('だいず', '豆類', 3),
-                ('てんさい', '根菜', 4),
-                ('ばれいしょ', '根菜', 5),
-                ('あずき', '豆類', 6),
-                ('たまねぎ', '野菜', 7),
-                ('にんじん', '野菜', 8),
-                ('かぼちゃ', '野菜', 9),
-                ('スイートコーン', '穀物', 10),
+                ('小麦(春播)', '穀物', 1, 'イネ科'),
+                ('小麦(秋播)', '穀物', 2, 'イネ科'),
+                ('だいず', '豆類', 3, 'マメ科'),
+                ('てんさい', '根菜', 4, 'アカザ科'),
+                ('ばれいしょ', '根菜', 5, 'ナス科'),
+                ('あずき', '豆類', 6, 'マメ科'),
+                ('たまねぎ', '野菜', 7, 'ユリ科'),
+                ('にんじん', '野菜', 8, 'セリ科'),
+                ('かぼちゃ', '野菜', 9, 'ウリ科'),
+                ('スイートコーン', '穀物', 10, 'イネ科'),
             ]
-            for name, category, order in initial_crops:
+            for name, category, order, family in initial_crops:
                 conn.execute("""
-                    INSERT INTO crop_master (name, category, display_order)
-                    VALUES (?, ?, ?)
-                """, (name, category, order))
+                    INSERT INTO crop_master (name, category, display_order, family)
+                    VALUES (?, ?, ?, ?)
+                """, (name, category, order, family))
 
         # user_crops テーブル
         cursor = conn.execute("""
@@ -1118,13 +1119,13 @@ class CropMasterRepository:
             return row_to_dict(cursor.fetchone())
 
     @staticmethod
-    def create(name: str, display_order: int = 0) -> int:
+    def create(name: str, display_order: int = 0, family: str = None) -> int:
         """作物を追加"""
         with get_db() as conn:
             cursor = conn.execute("""
-                INSERT INTO crop_master (name, display_order)
-                VALUES (?, ?)
-            """, (name, display_order))
+                INSERT INTO crop_master (name, display_order, family)
+                VALUES (?, ?, ?)
+            """, (name, display_order, family))
             conn.commit()
             return cursor.lastrowid
 
@@ -1134,7 +1135,7 @@ class CropMasterRepository:
         with get_db() as conn:
             fields = []
             values = []
-            for key in ['name', 'display_order', 'is_active']:
+            for key in ['name', 'family', 'display_order', 'is_active']:
                 if key in data:
                     fields.append(f"{key} = ?")
                     values.append(data[key])
@@ -1160,6 +1161,33 @@ class CropMasterRepository:
             )
             conn.commit()
             return True
+
+    @staticmethod
+    def get_family_map() -> Dict[str, str]:
+        """作物名→科名マッピング取得。UserCropも解決。
+
+        Returns:
+            {作物名: 科名} の辞書。familyがNULLの作物は除外。
+        """
+        with get_db() as conn:
+            # crop_masterから直接取得
+            cursor = conn.execute("""
+                SELECT name, family FROM crop_master
+                WHERE family IS NOT NULL AND is_active = 1
+            """)
+            family_map = {row['name']: row['family'] for row in cursor.fetchall()}
+
+            # UserCropのcustom_nameも解決（親のfamilyを引き継ぐ）
+            cursor = conn.execute("""
+                SELECT uc.custom_name, cm.family
+                FROM user_crops uc
+                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
+                WHERE uc.custom_name IS NOT NULL AND cm.family IS NOT NULL
+            """)
+            for row in cursor.fetchall():
+                family_map[row['custom_name']] = row['family']
+
+            return family_map
 
 
 # =============================================================================
@@ -2307,6 +2335,345 @@ class InventoryRepository:
             else:
                 return []
             return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
+# 水田ポリゴン（Paddy Polygons）リポジトリ
+# =============================================================================
+
+def ensure_paddy_polygons_table():
+    """paddy_polygons テーブルが存在しない場合は作成する"""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS paddy_polygons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                field_id INTEGER NOT NULL,
+                geometry TEXT NOT NULL,
+                area_ha REAL NOT NULL,
+                is_converted INTEGER DEFAULT 0,
+                conversion_start_year INTEGER,
+                source TEXT DEFAULT 'manual',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (field_id) REFERENCES fields(id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_paddy_polygons_field_id
+            ON paddy_polygons(field_id)
+        """)
+        conn.commit()
+
+
+class PaddyPolygonRepository:
+    """水田ポリゴンデータのCRUD操作"""
+
+    @staticmethod
+    def create(
+        field_id: int,
+        geometry: str,
+        area_ha: float,
+        is_converted: bool = False,
+        conversion_start_year: Optional[int] = None,
+        source: str = 'manual',
+        notes: Optional[str] = None
+    ) -> int:
+        """水田ポリゴンを作成"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                INSERT INTO paddy_polygons (
+                    field_id, geometry, area_ha, is_converted,
+                    conversion_start_year, source, notes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                field_id,
+                geometry,
+                area_ha,
+                1 if is_converted else 0,
+                conversion_start_year,
+                source,
+                notes
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    @staticmethod
+    def get_by_id(polygon_id: int) -> Optional[Dict[str, Any]]:
+        """IDで水田ポリゴンを取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM paddy_polygons WHERE id = ?",
+                (polygon_id,)
+            )
+            return row_to_dict(cursor.fetchone())
+
+    @staticmethod
+    def get_by_field(field_id: int) -> List[Dict[str, Any]]:
+        """ほ場IDで水田ポリゴン一覧を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM paddy_polygons WHERE field_id = ? ORDER BY id",
+                (field_id,)
+            )
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def get_all_for_user(user_id: int) -> List[Dict[str, Any]]:
+        """ユーザーの全水田ポリゴンを取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT pp.*
+                FROM paddy_polygons pp
+                JOIN fields f ON pp.field_id = f.id
+                WHERE f.user_id = ?
+                ORDER BY pp.id
+            """, (user_id,))
+            return rows_to_list(cursor.fetchall())
+
+    @staticmethod
+    def update(polygon_id: int, **kwargs) -> bool:
+        """水田ポリゴンを更新"""
+        with get_db() as conn:
+            updates = []
+            values = []
+            for key in ['geometry', 'area_ha', 'is_converted', 'conversion_start_year', 'source', 'notes']:
+                if key in kwargs:
+                    updates.append(f"{key} = ?")
+                    if key == 'is_converted':
+                        values.append(1 if kwargs[key] else 0)
+                    else:
+                        values.append(kwargs[key])
+
+            if not updates:
+                return False
+
+            updates.append("updated_at = datetime('now', 'localtime')")
+            values.append(polygon_id)
+
+            cursor = conn.execute(
+                f"UPDATE paddy_polygons SET {', '.join(updates)} WHERE id = ?",
+                values
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def delete(polygon_id: int) -> bool:
+        """水田ポリゴンを削除"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM paddy_polygons WHERE id = ?",
+                (polygon_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def get_stats(user_id: int) -> Dict[str, Any]:
+        """ユーザーの水田ポリゴン統計を取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) AS total_count,
+                    COALESCE(SUM(pp.area_ha), 0) AS total_area_ha,
+                    COALESCE(SUM(CASE WHEN pp.is_converted = 0 THEN pp.area_ha ELSE 0 END), 0) AS paddy_area_ha,
+                    COALESCE(SUM(CASE WHEN pp.is_converted = 1 THEN pp.area_ha ELSE 0 END), 0) AS converted_area_ha,
+                    SUM(CASE WHEN pp.is_converted = 0 THEN 1 ELSE 0 END) AS paddy_count,
+                    SUM(CASE WHEN pp.is_converted = 1 THEN 1 ELSE 0 END) AS converted_count
+                FROM paddy_polygons pp
+                JOIN fields f ON pp.field_id = f.id
+                WHERE f.user_id = ?
+            """, (user_id,))
+            row = cursor.fetchone()
+            return row_to_dict(row) if row else {
+                'total_count': 0, 'total_area_ha': 0,
+                'paddy_area_ha': 0, 'converted_area_ha': 0,
+                'paddy_count': 0, 'converted_count': 0
+            }
+
+
+# =============================================================================
+# 作付けポリゴン（Crop Polygons）リポジトリ
+# =============================================================================
+
+def ensure_crop_polygons_table():
+    """crop_polygons テーブルが存在しない場合は作成する"""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crop_polygons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                field_id INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                crop_name TEXT NOT NULL,
+                geometry TEXT NOT NULL,
+                area_ha REAL NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (field_id) REFERENCES fields(id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crop_polygons_field_year
+            ON crop_polygons(field_id, year)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crop_polygons_year
+            ON crop_polygons(year)
+        """)
+        conn.commit()
+
+
+class CropPolygonRepository:
+    """作付けポリゴンデータのCRUD操作"""
+
+    @staticmethod
+    def create(
+        field_id: int,
+        year: int,
+        crop_name: str,
+        geometry: str,
+        area_ha: float,
+        notes: str = None
+    ) -> int:
+        """作付けポリゴンを作成し、作成されたIDを返す"""
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO crop_polygons (
+                        field_id, year, crop_name, geometry, area_ha, notes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (field_id, year, crop_name, geometry, area_ha, notes))
+                polygon_id = cursor.lastrowid
+                return polygon_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
+
+    @staticmethod
+    def get_by_id(polygon_id: int) -> Optional[Dict[str, Any]]:
+        """IDで作付けポリゴンを取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM crop_polygons WHERE id = ?",
+                (polygon_id,)
+            )
+            row = cursor.fetchone()
+            return row_to_dict(row)
+
+    @staticmethod
+    def get_by_field_year(field_id: int, year: int) -> List[Dict[str, Any]]:
+        """ほ場IDと年度で作付けポリゴン一覧を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM crop_polygons WHERE field_id = ? AND year = ? ORDER BY id",
+                (field_id, year)
+            )
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
+
+    @staticmethod
+    def get_all_for_user_year(user_id: int, year: int) -> List[Dict[str, Any]]:
+        """ユーザーの特定年度の全作付けポリゴンを取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT cp.*
+                FROM crop_polygons cp
+                JOIN fields f ON cp.field_id = f.id
+                WHERE f.user_id = ? AND cp.year = ?
+                ORDER BY cp.id
+            """, (user_id, year))
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
+
+    @staticmethod
+    def update(polygon_id: int, **kwargs) -> bool:
+        """作付けポリゴンを更新。更新成功ならTrue"""
+        try:
+            with get_db() as conn:
+                updates = []
+                values = []
+                for key in ['year', 'crop_name', 'geometry', 'area_ha', 'notes']:
+                    if key in kwargs:
+                        updates.append(f"{key} = ?")
+                        values.append(kwargs[key])
+
+                if not updates:
+                    return False
+
+                updates.append("updated_at = datetime('now', 'localtime')")
+                values.append(polygon_id)
+
+                sql = f"UPDATE crop_polygons SET {', '.join(updates)} WHERE id = ?"
+                cursor = conn.execute(sql, values)
+                success = cursor.rowcount > 0
+                return success
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
+
+    @staticmethod
+    def delete(polygon_id: int) -> bool:
+        """作付けポリゴンを削除。削除成功ならTrue"""
+        try:
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM crop_polygons WHERE id = ?",
+                    (polygon_id,)
+                )
+                success = cursor.rowcount > 0
+                return success
+        except sqlite3.Error as e:
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
+
+    @staticmethod
+    def copy_from_previous_year(user_id: int, from_year: int, to_year: int) -> int:
+        """前年度の作付けポリゴンを次年度にコピー。コピー件数を返す"""
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO crop_polygons (
+                        field_id, year, crop_name, geometry, area_ha, notes
+                    )
+                    SELECT
+                        cp.field_id, ?, cp.crop_name, cp.geometry, cp.area_ha, cp.notes
+                    FROM crop_polygons cp
+                    JOIN fields f ON cp.field_id = f.id
+                    WHERE f.user_id = ? AND cp.year = ?
+                """, (to_year, user_id, from_year))
+                count = cursor.rowcount
+                return count
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
 
 # =============================================================================

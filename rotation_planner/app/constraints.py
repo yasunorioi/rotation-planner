@@ -108,6 +108,10 @@ class Constraints:
     preferred_transitions: Dict[Tuple[str, str], float] = field(default_factory=dict)
     main_crops: List[str] = field(default_factory=list)
     unknown_mode: str = "ignore"  # "ignore" or "safe"
+    # PRO: 隣接筆の同一科制約
+    adjacent_family_enabled: bool = False
+    adjacency_pairs: List[Tuple[int, int]] = field(default_factory=list)  # field index pairs
+    crop_family_map: Dict[str, str] = field(default_factory=dict)  # crop_name -> family
 
 
 # =============================================================================

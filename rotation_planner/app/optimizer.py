@@ -88,13 +88,35 @@ class RotationPlannerHeuristic:
 
         return True
 
+    def check_adjacency_constraint(self, field_idx: int, year: str, crop: str, plan: Dict) -> bool:
+        """隣接筆の同一科制約をチェック（PRO機能）"""
+        if not self.constraints.adjacent_family_enabled:
+            return True
+        family = self.constraints.crop_family_map.get(crop)
+        if not family:
+            return True
+        for idx_a, idx_b in self.constraints.adjacency_pairs:
+            neighbor_idx = None
+            if idx_a == field_idx:
+                neighbor_idx = idx_b
+            elif idx_b == field_idx:
+                neighbor_idx = idx_a
+            if neighbor_idx is not None:
+                neighbor_crop = plan.get((neighbor_idx, year))
+                if neighbor_crop:
+                    neighbor_family = self.constraints.crop_family_map.get(neighbor_crop)
+                    if neighbor_family and neighbor_family == family:
+                        return False
+        return True
+
     def get_valid_crops(self, field_idx: int, year: str, plan: Dict) -> List[str]:
         """有効な作物リストを取得"""
         valid = []
         for crop in self.crops:
             if self.check_gap_constraint(field_idx, year, crop, plan):
                 if self.check_transition_constraint(field_idx, year, crop, plan):
-                    valid.append(crop)
+                    if self.check_adjacency_constraint(field_idx, year, crop, plan):
+                        valid.append(crop)
         return valid
 
     def calculate_year_stats(self, year: str, plan: Dict) -> Dict[str, Tuple[float, int]]:
@@ -522,6 +544,27 @@ class RotationPlannerORTools:
                         model.Add(x[f_idx, y, beet_idx] == 0)
                     if potato_idx is not None:
                         model.Add(x[f_idx, y, potato_idx] == 0)
+
+        # 制約10: 隣接筆の同一科制約（PRO機能）
+        if self.constraints.adjacent_family_enabled and self.constraints.adjacency_pairs:
+            # 科→作物インデックスリストのマッピング
+            family_to_crop_indices: Dict[str, List[int]] = {}
+            for c_idx in range(self.num_crops):
+                crop_name = self.idx_to_crop[c_idx]
+                fam = self.constraints.crop_family_map.get(crop_name)
+                if fam:
+                    family_to_crop_indices.setdefault(fam, []).append(c_idx)
+
+            for fam, c_indices in family_to_crop_indices.items():
+                if len(c_indices) < 1:
+                    continue
+                for idx_a, idx_b in self.constraints.adjacency_pairs:
+                    if idx_a >= self.num_fields or idx_b >= self.num_fields:
+                        continue
+                    for y in range(self.num_future_years):
+                        # 同一科の作物が隣接ほ場に同時に割り当てられない
+                        family_sum = sum(x[idx_a, y, ci] + x[idx_b, y, ci] for ci in c_indices)
+                        model.Add(family_sum <= 1)
 
         # 目的関数
         area_cy = {}

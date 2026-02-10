@@ -62,9 +62,6 @@ export default function FieldRegister() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState('');
 
-  // 削除
-  const [deleteId, setDeleteId] = useState('');
-
   // 選択中のほ場
   const [selectedField, setSelectedField] = useState(null);
 
@@ -93,6 +90,7 @@ export default function FieldRegister() {
   const [isFudeLoading, setIsFudeLoading] = useState(false);
 
   const mapRef = useRef(null);
+  const mapContainerRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -166,7 +164,7 @@ export default function FieldRegister() {
     }
   }, []);
 
-  // ほ場クリック
+  // ほ場クリック（地図ズーム + スクロール）
   const handleFieldClick = useCallback((field) => {
     setSelectedField(field);
     setFormData({
@@ -176,6 +174,22 @@ export default function FieldRegister() {
       crop_year: '',
       crop_name: '',
     });
+
+    // 座標があれば地図をフィットしてスクロール
+    if (field.coordinates_json) {
+      let coords;
+      try {
+        coords = typeof field.coordinates_json === 'string'
+          ? JSON.parse(field.coordinates_json)
+          : field.coordinates_json;
+      } catch { /* ignore */ }
+
+      if (coords && coords.length >= 3 && mapRef.current?.fitToCoords) {
+        mapRef.current.fitToCoords(coords);
+        // 地図セクションまでスクロール
+        mapContainerRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      }
+    }
   }, []);
 
   // 筆ポリゴン読み込み
@@ -328,33 +342,6 @@ export default function FieldRegister() {
       loadDistricts();
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.detail || '登録に失敗しました' });
-    }
-  };
-
-  // ほ場削除
-  const handleDelete = async () => {
-    if (!deleteId.trim()) {
-      setMessage({ type: 'error', text: '削除するほ場IDを入力してください' });
-      return;
-    }
-
-    const field = fields.find((f) => f.field_code === deleteId.trim());
-    if (!field) {
-      setMessage({ type: 'error', text: `ほ場「${deleteId}」が見つかりません` });
-      return;
-    }
-
-    if (!confirm(`ほ場「${deleteId}」を削除しますか？`)) {
-      return;
-    }
-
-    try {
-      await fieldApi.delete(field.id);
-      setMessage({ type: 'success', text: `ほ場「${deleteId}」を削除しました` });
-      setDeleteId('');
-      loadFields();
-    } catch (err) {
-      setMessage({ type: 'error', text: '削除に失敗しました' });
     }
   };
 
@@ -650,6 +637,74 @@ export default function FieldRegister() {
     setIsRegistering(false);
   };
 
+  // 地区名一括補完（地区が空のほ場に逆ジオコーディングで地区名を設定）
+  const [isFillingDistricts, setIsFillingDistricts] = useState(false);
+
+  const handleFillDistricts = async () => {
+    const targets = fields.filter((f) => !f.district && f.coordinates_json);
+    if (targets.length === 0) {
+      setMessage({ type: 'info', text: '地区が空欄のほ場はありません' });
+      return;
+    }
+
+    if (!confirm(`地区が空欄の${targets.length}件に逆ジオコーディングで地区名を設定します。よろしいですか？`)) {
+      return;
+    }
+
+    setIsFillingDistricts(true);
+    setMessage({ type: 'info', text: `${targets.length}件の地区名を取得中...` });
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const field of targets) {
+      let coords;
+      try {
+        coords = typeof field.coordinates_json === 'string'
+          ? JSON.parse(field.coordinates_json)
+          : field.coordinates_json;
+      } catch { continue; }
+
+      if (!coords || coords.length < 3) continue;
+
+      // 重心計算
+      const latSum = coords.reduce((sum, c) => sum + c[0], 0);
+      const lngSum = coords.reduce((sum, c) => sum + c[1], 0);
+      const lat = latSum / coords.length;
+      const lng = lngSum / coords.length;
+
+      try {
+        // Nominatim rate limit: 1req/sec
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=15&addressdetails=1`,
+          { headers: { 'User-Agent': 'FieldRegisterApp/1.0' } }
+        );
+        const data = await res.json();
+        const addr = data.address || {};
+        const district = addr.suburb || addr.neighbourhood || addr.city_district || addr.village || null;
+
+        if (district) {
+          await fieldApi.update(field.id, { district });
+          successCount++;
+        }
+
+        // rate limit対策: 1秒待機
+        await new Promise((r) => setTimeout(r, 1100));
+      } catch (err) {
+        console.error(`District fill error for ${field.field_code}:`, err);
+        errorCount++;
+      }
+    }
+
+    setIsFillingDistricts(false);
+    setMessage({
+      type: successCount > 0 ? 'success' : 'info',
+      text: `地区名補完: ${successCount}件更新${errorCount > 0 ? `、${errorCount}件エラー` : ''}`,
+    });
+    loadFields();
+    loadDistricts();
+  };
+
   // KMLエクスポート
   const handleExportKml = () => {
     const fieldsWithCoords = fields.filter((f) => f.coordinates_json);
@@ -712,202 +767,19 @@ export default function FieldRegister() {
         <h1>🗺️ ほ場登録</h1>
       </div>
 
-      <p className="page-description">
-        地図上でポリゴンを描画し、ほ場の位置と面積を登録します。
-      </p>
-
       {message && (
         <div className={`message ${message.type}`}>
           {message.text}
         </div>
       )}
 
-      <div className="field-register-layout">
-        <div className="map-section">
-          {/* 住所検索 */}
-          <div className="search-bar">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="住所・地名検索（例: 札幌市、十勝、美瑛町）"
-            />
-            <button onClick={handleSearch} className="btn-secondary">
-              🔍 検索
-            </button>
-          </div>
-          {searchResult && <p className="search-result">{searchResult}</p>}
-
-          {/* 筆ポリゴン表示トグル */}
-          <div className="fude-toggle">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={showFudePolygons}
-                onChange={handleToggleFudePolygons}
-                disabled={isFudeLoading}
-              />
-              <span>筆ポリゴン表示{isFudeLoading ? '（読込中...）' : ''}</span>
-            </label>
-            {showFudePolygons && (
-              <button onClick={loadFudePolygons} className="btn-secondary btn-small" disabled={isFudeLoading}>
-                🔄 再読込
-              </button>
-            )}
-            {fudePolygons.length > 0 && (
-              <span className="fude-count">（{fudePolygons.length}件）</span>
-            )}
-          </div>
-
-          {/* 地図 */}
-          <div ref={mapRef}>
-            <FieldMap
-              fields={fields}
-              onPolygonCreated={handlePolygonCreated}
-              onFieldClick={handleFieldClick}
-              onFudePolygonClick={handleFudePolygonClick}
-              selectedFieldId={selectedField?.id}
-              fudePolygons={fudePolygons}
-              showFudePolygons={showFudePolygons}
-              previewPolygons={kmlPreviewData.map((preview) => {
-                const coords = kmlCoordsData.find((c) => c.field_id === preview.field_id);
-                return coords ? { ...preview, coordinates: coords.coordinates } : null;
-              }).filter(Boolean)}
-            />
-          </div>
-
-          <div className="map-instructions">
-            <strong>使い方:</strong>
-            <ol>
-              <li>右上の多角形ツール（六角形アイコン）をクリック</li>
-              <li>地図上をクリックしてポリゴンの頂点を打つ</li>
-              <li>最後にダブルクリックまたは最初の点をクリックして完了</li>
-              <li>編集は鉛筆アイコン、削除はゴミ箱アイコン</li>
-            </ol>
-          </div>
-        </div>
-
-        <div className="form-section">
-          {/* 登録フォーム */}
-          <div className="form-card">
-            <h3>ほ場情報</h3>
-            <form onSubmit={handleRegister}>
-              <div className="form-group">
-                <label>ほ場名</label>
-                <input
-                  type="text"
-                  value={formData.field_name}
-                  onChange={(e) => setFormData({ ...formData, field_name: e.target.value })}
-                  placeholder="例: 北1号"
-                />
-              </div>
-              <div className="form-group">
-                <label>地区</label>
-                <input
-                  type="text"
-                  value={formData.district}
-                  onChange={(e) => setFormData({ ...formData, district: e.target.value })}
-                  list="district-options"
-                  placeholder="地区名を入力または選択"
-                />
-                <datalist id="district-options">
-                  {districts.map((d) => <option key={d} value={d} />)}
-                </datalist>
-                {suggestedDistrict && formData.district === suggestedDistrict && (
-                  <div style={{ marginTop: '4px', fontSize: '0.85em', color: '#28a745' }}>
-                    📍 {suggestedDistrict}（自動取得）
-                  </div>
-                )}
-              </div>
-              <div className="form-group checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={formData.beet_forbidden}
-                    onChange={(e) => setFormData({ ...formData, beet_forbidden: e.target.checked })}
-                  />
-                  馬鈴薯・てんさい禁止
-                </label>
-              </div>
-
-              {/* 初期作付情報（任意） */}
-              <div className="initial-crop-section" style={{
-                marginTop: '16px',
-                padding: '12px',
-                background: '#f8f9fa',
-                borderRadius: '8px',
-                border: '1px solid #e9ecef'
-              }}>
-                <label style={{ fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>
-                  🌾 初期作付情報（任意）
-                </label>
-                <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '12px' }}>
-                  ほ場登録と同時に今年度の作付を設定できます
-                </p>
-                <div className="form-row" style={{ display: 'flex', gap: '12px' }}>
-                  <div className="form-group" style={{ flex: 1 }}>
-                    <label>作付年度</label>
-                    <select
-                      value={formData.crop_year}
-                      onChange={(e) => setFormData({ ...formData, crop_year: e.target.value })}
-                    >
-                      <option value="">-- 選択しない --</option>
-                      {yearChoices.map((y) => (
-                        <option key={y.value} value={y.value}>{y.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ flex: 2 }}>
-                    <label>作物</label>
-                    <select
-                      value={formData.crop_name}
-                      onChange={(e) => setFormData({ ...formData, crop_name: e.target.value })}
-                      disabled={!formData.crop_year}
-                    >
-                      <option value="">-- 選択しない --</option>
-                      {crops.map((c) => (
-                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
-                          {c.custom_name || c.name || c.crop_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {drawnArea > 0 && (
-                <div className="drawn-area-info">
-                  <strong>描画した面積:</strong> {(drawnArea / 10000).toFixed(4)} ha ({(drawnArea / 100).toFixed(2)} a)
-                </div>
-              )}
-
-              <button type="submit" className="btn-primary btn-large">
-                ✅ 登録
-              </button>
-            </form>
-          </div>
-
-          {/* 削除 */}
-          <div className="form-card">
-            <h3>🗑️ 削除</h3>
-            <div className="form-group">
-              <label>削除するほ場ID</label>
-              <input
-                type="text"
-                value={deleteId}
-                onChange={(e) => setDeleteId(e.target.value)}
-                placeholder="削除したいほ場IDを入力"
-              />
-            </div>
-            <button onClick={handleDelete} className="btn-danger">
-              🗑️ 削除
-            </button>
-          </div>
-
-          {/* KMLインポート（2段階：プレビュー編集→一括登録） */}
-          <div className="form-card">
-            <h3>📤 KML/KMZインポート</h3>
+      {/* KML/KMZインポート・エクスポート */}
+      <div className="kml-section" style={{ marginTop: '24px' }}>
+        <h2>📤 KML/KMZインポート・エクスポート</h2>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+          {/* インポート */}
+          <div className="form-card" style={{ flex: 2, minWidth: '300px' }}>
+            <h3>📤 インポート</h3>
             <div className="form-group">
               <label>KML/KMZファイル選択</label>
               <input
@@ -948,164 +820,6 @@ export default function FieldRegister() {
               )}
             </div>
 
-            {/* KMLプレビュー編集テーブル */}
-            {kmlPreviewData.length > 0 && (
-              <div className="kml-preview-section" style={{ marginTop: '16px' }}>
-                <h4>📋 プレビュー編集 ({kmlPreviewData.length}件)</h4>
-
-                {/* 一括設定エリア */}
-                <div className="bulk-settings" style={{
-                  padding: '12px',
-                  background: '#e8f4fd',
-                  borderRadius: '8px',
-                  marginBottom: '12px',
-                  border: '1px solid #b8daff'
-                }}>
-                  <strong>一括設定</strong>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <select
-                      value={kmlYear}
-                      onChange={(e) => setKmlYear(e.target.value)}
-                      style={{ padding: '4px 8px' }}
-                    >
-                      {yearChoices.map((y) => (
-                        <option key={y.value} value={y.value}>{y.label}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={bulkCrop}
-                      onChange={(e) => setBulkCrop(e.target.value)}
-                      style={{ padding: '4px 8px', minWidth: '120px' }}
-                    >
-                      <option value="">-- 作物選択 --</option>
-                      {crops.map((c) => (
-                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
-                          {c.custom_name || c.name || c.crop_name}
-                        </option>
-                      ))}
-                    </select>
-                    <button onClick={handleApplyBulkCrop} className="btn-secondary btn-small">
-                      📋 作物を全ほ場に適用
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      value={bulkDistrict}
-                      onChange={(e) => setBulkDistrict(e.target.value)}
-                      list="district-options-kml"
-                      placeholder="地区名"
-                      style={{ padding: '4px 8px', minWidth: '120px' }}
-                    />
-                    <datalist id="district-options-kml">
-                      {districts.map((d) => <option key={d} value={d} />)}
-                    </datalist>
-                    <button onClick={handleApplyBulkDistrict} className="btn-secondary btn-small">
-                      📋 地区を全ほ場に適用
-                    </button>
-                    {suggestedDistrict && (
-                      <span style={{ fontSize: '0.85em', color: '#28a745' }}>
-                        📍 {suggestedDistrict}（自動割当済）
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <input
-                        type="checkbox"
-                        checked={bulkBeetForbidden}
-                        onChange={(e) => setBulkBeetForbidden(e.target.checked)}
-                      />
-                      てんさい禁止
-                    </label>
-                    <button onClick={handleApplyBulkBeetForbidden} className="btn-secondary btn-small">
-                      📋 禁止設定を全ほ場に適用
-                    </button>
-                  </div>
-                </div>
-
-                {/* プレビューテーブル */}
-                <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px' }}>
-                  <table className="data-table" style={{ fontSize: '0.85em' }}>
-                    <thead style={{ position: 'sticky', top: 0, background: '#f8f9fa' }}>
-                      <tr>
-                        <th style={{ width: '13%' }}>ほ場ID</th>
-                        <th style={{ width: '20%' }}>ほ場名</th>
-                        <th style={{ width: '15%' }}>地区</th>
-                        <th style={{ width: '10%' }}>面積(ha)</th>
-                        <th style={{ width: '22%' }}>作物</th>
-                        <th style={{ width: '8%' }}>禁止</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {kmlPreviewData.map((row, idx) => (
-                        <tr key={idx}>
-                          <td>
-                            <input
-                              type="text"
-                              value={row.field_id}
-                              onChange={(e) => handlePreviewRowChange(idx, 'field_id', e.target.value)}
-                              style={{ width: '100%', padding: '2px 4px' }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={row.field_name}
-                              onChange={(e) => handlePreviewRowChange(idx, 'field_name', e.target.value)}
-                              style={{ width: '100%', padding: '2px 4px' }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={row.district}
-                              onChange={(e) => handlePreviewRowChange(idx, 'district', e.target.value)}
-                              list="district-options-kml"
-                              style={{ width: '100%', padding: '2px 4px' }}
-                            />
-                          </td>
-                          <td style={{ textAlign: 'right' }}>{row.area_ha.toFixed(2)}</td>
-                          <td>
-                            <select
-                              value={row.crop}
-                              onChange={(e) => handlePreviewRowChange(idx, 'crop', e.target.value)}
-                              style={{ width: '100%', padding: '2px 4px' }}
-                            >
-                              <option value="">-- 未設定 --</option>
-                              {crops.map((c) => (
-                                <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
-                                  {c.custom_name || c.name || c.crop_name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={row.beet_forbidden}
-                              onChange={(e) => handlePreviewRowChange(idx, 'beet_forbidden', e.target.checked)}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 一括登録ボタン */}
-                <div style={{ marginTop: '12px', textAlign: 'center' }}>
-                  <button
-                    onClick={handleRegisterAllKml}
-                    className="btn-primary btn-large"
-                    disabled={isRegistering || kmlPreviewData.length === 0}
-                  >
-                    {isRegistering ? '⏳ 登録中...' : `✅ ${kmlPreviewData.length}件を一括登録`}
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* 直接インポート結果（KMZ用） */}
             {importedFields.length > 0 && kmlPreviewData.length === 0 && (
               <div className="import-preview">
@@ -1126,18 +840,366 @@ export default function FieldRegister() {
           </div>
 
           {/* エクスポート */}
-          <div className="form-card">
+          <div className="form-card" style={{ flex: 1, minWidth: '200px' }}>
             <h3>📥 エクスポート</h3>
+            <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
+              登録済みほ場をKML形式でダウンロード
+            </p>
             <button onClick={handleExportKml} className="btn-secondary">
               📥 KMLでエクスポート
             </button>
+          </div>
+        </div>
+
+        {/* KMLプレビュー編集テーブル */}
+        {kmlPreviewData.length > 0 && (
+          <div className="kml-preview-section" style={{ marginTop: '16px' }}>
+            <h3>📋 プレビュー編集 ({kmlPreviewData.length}件)</h3>
+
+            {/* 一括設定エリア */}
+            <div className="bulk-settings" style={{
+              padding: '12px',
+              background: '#e8f4fd',
+              borderRadius: '8px',
+              marginBottom: '12px',
+              border: '1px solid #b8daff'
+            }}>
+              <strong>一括設定</strong>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={kmlYear}
+                  onChange={(e) => setKmlYear(e.target.value)}
+                  style={{ padding: '4px 8px' }}
+                >
+                  {yearChoices.map((y) => (
+                    <option key={y.value} value={y.value}>{y.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={bulkCrop}
+                  onChange={(e) => setBulkCrop(e.target.value)}
+                  style={{ padding: '4px 8px', minWidth: '120px' }}
+                >
+                  <option value="">-- 作物選択 --</option>
+                  {crops.map((c) => (
+                    <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                      {c.custom_name || c.name || c.crop_name}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={handleApplyBulkCrop} className="btn-secondary btn-small">
+                  📋 作物を全ほ場に適用
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={bulkDistrict}
+                  onChange={(e) => setBulkDistrict(e.target.value)}
+                  list="district-options-kml"
+                  placeholder="地区名"
+                  style={{ padding: '4px 8px', minWidth: '120px' }}
+                />
+                <datalist id="district-options-kml">
+                  {districts.map((d) => <option key={d} value={d} />)}
+                </datalist>
+                <button onClick={handleApplyBulkDistrict} className="btn-secondary btn-small">
+                  📋 地区を全ほ場に適用
+                </button>
+                {suggestedDistrict && (
+                  <span style={{ fontSize: '0.85em', color: '#28a745' }}>
+                    📍 {suggestedDistrict}（自動割当済）
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input
+                    type="checkbox"
+                    checked={bulkBeetForbidden}
+                    onChange={(e) => setBulkBeetForbidden(e.target.checked)}
+                  />
+                  てんさい禁止
+                </label>
+                <button onClick={handleApplyBulkBeetForbidden} className="btn-secondary btn-small">
+                  📋 禁止設定を全ほ場に適用
+                </button>
+              </div>
+            </div>
+
+            {/* プレビューテーブル */}
+            <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px' }}>
+              <table className="data-table" style={{ fontSize: '0.85em' }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#f8f9fa' }}>
+                  <tr>
+                    <th style={{ width: '13%' }}>ほ場ID</th>
+                    <th style={{ width: '20%' }}>ほ場名</th>
+                    <th style={{ width: '15%' }}>地区</th>
+                    <th style={{ width: '10%' }}>面積(ha)</th>
+                    <th style={{ width: '22%' }}>作物</th>
+                    <th style={{ width: '8%' }}>制限</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kmlPreviewData.map((row, idx) => (
+                    <tr key={idx}>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.field_id}
+                          onChange={(e) => handlePreviewRowChange(idx, 'field_id', e.target.value)}
+                          style={{ width: '100%', padding: '2px 4px' }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.field_name}
+                          onChange={(e) => handlePreviewRowChange(idx, 'field_name', e.target.value)}
+                          style={{ width: '100%', padding: '2px 4px' }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.district}
+                          onChange={(e) => handlePreviewRowChange(idx, 'district', e.target.value)}
+                          list="district-options-kml"
+                          style={{ width: '100%', padding: '2px 4px' }}
+                        />
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{row.area_ha.toFixed(2)}</td>
+                      <td>
+                        <select
+                          value={row.crop}
+                          onChange={(e) => handlePreviewRowChange(idx, 'crop', e.target.value)}
+                          style={{ width: '100%', padding: '2px 4px' }}
+                        >
+                          <option value="">-- 未設定 --</option>
+                          {crops.map((c) => (
+                            <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                              {c.custom_name || c.name || c.crop_name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={row.beet_forbidden}
+                          onChange={(e) => handlePreviewRowChange(idx, 'beet_forbidden', e.target.checked)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 一括登録ボタン */}
+            <div style={{ marginTop: '12px', textAlign: 'center' }}>
+              <button
+                onClick={handleRegisterAllKml}
+                className="btn-primary btn-large"
+                disabled={isRegistering || kmlPreviewData.length === 0}
+              >
+                {isRegistering ? '⏳ 登録中...' : `✅ ${kmlPreviewData.length}件を一括登録`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 個別ほ場登録（ポリゴン描画） */}
+      <div className="polygon-register-section" style={{ marginTop: '24px' }}>
+        <h2>✏️ 個別ほ場登録（ポリゴン描画）</h2>
+        <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
+          1筆ずつ地図上でポリゴンを描画して登録します。
+        </p>
+
+        <div className="field-register-layout">
+          <div className="map-section">
+            {/* 住所検索 */}
+            <div className="search-bar">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="住所・地名検索（例: 札幌市、十勝、美瑛町）"
+              />
+              <button onClick={handleSearch} className="btn-secondary">
+                🔍 検索
+              </button>
+            </div>
+            {searchResult && <p className="search-result">{searchResult}</p>}
+
+            {/* 筆ポリゴン表示トグル */}
+            <div className="fude-toggle">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={showFudePolygons}
+                  onChange={handleToggleFudePolygons}
+                  disabled={isFudeLoading}
+                />
+                <span>筆ポリゴン表示{isFudeLoading ? '（読込中...）' : ''}</span>
+              </label>
+              {showFudePolygons && (
+                <button onClick={loadFudePolygons} className="btn-secondary btn-small" disabled={isFudeLoading}>
+                  🔄 再読込
+                </button>
+              )}
+              {fudePolygons.length > 0 && (
+                <span className="fude-count">（{fudePolygons.length}件）</span>
+              )}
+            </div>
+
+            {/* 地図 */}
+            <div ref={mapContainerRef}>
+              <FieldMap
+                ref={mapRef}
+                fields={fields}
+                onPolygonCreated={handlePolygonCreated}
+                onFieldClick={handleFieldClick}
+                onFudePolygonClick={handleFudePolygonClick}
+                selectedFieldId={selectedField?.id}
+                fudePolygons={fudePolygons}
+                showFudePolygons={showFudePolygons}
+                previewPolygons={kmlPreviewData.map((preview) => {
+                  const coords = kmlCoordsData.find((c) => c.field_id === preview.field_id);
+                  return coords ? { ...preview, coordinates: coords.coordinates } : null;
+                }).filter(Boolean)}
+              />
+            </div>
+
+            <div className="map-instructions">
+              <strong>使い方:</strong>
+              <ol>
+                <li>右上の多角形ツール（六角形アイコン）をクリック</li>
+                <li>地図上をクリックしてポリゴンの頂点を打つ</li>
+                <li>最後にダブルクリックまたは最初の点をクリックして完了</li>
+                <li>編集は鉛筆アイコン、削除はゴミ箱アイコン</li>
+              </ol>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-card">
+              <h3>ほ場情報</h3>
+              <form onSubmit={handleRegister}>
+                <div className="form-group">
+                  <label>ほ場名</label>
+                  <input
+                    type="text"
+                    value={formData.field_name}
+                    onChange={(e) => setFormData({ ...formData, field_name: e.target.value })}
+                    placeholder="例: 北1号"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>地区</label>
+                  <input
+                    type="text"
+                    value={formData.district}
+                    onChange={(e) => setFormData({ ...formData, district: e.target.value })}
+                    list="district-options"
+                    placeholder="地区名を入力または選択"
+                  />
+                  <datalist id="district-options">
+                    {districts.map((d) => <option key={d} value={d} />)}
+                  </datalist>
+                  {suggestedDistrict && formData.district === suggestedDistrict && (
+                    <div style={{ marginTop: '4px', fontSize: '0.85em', color: '#28a745' }}>
+                      📍 {suggestedDistrict}（自動取得）
+                    </div>
+                  )}
+                </div>
+                <div className="form-group checkbox">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={formData.beet_forbidden}
+                      onChange={(e) => setFormData({ ...formData, beet_forbidden: e.target.checked })}
+                    />
+                    馬鈴薯・てんさい禁止
+                  </label>
+                </div>
+
+                {/* 初期作付情報（任意） */}
+                <div className="initial-crop-section" style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  background: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <label style={{ fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>
+                    🌾 初期作付情報（任意）
+                  </label>
+                  <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '12px' }}>
+                    ほ場登録と同時に今年度の作付を設定できます
+                  </p>
+                  <div className="form-row" style={{ display: 'flex', gap: '12px' }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label>作付年度</label>
+                      <select
+                        value={formData.crop_year}
+                        onChange={(e) => setFormData({ ...formData, crop_year: e.target.value })}
+                      >
+                        <option value="">-- 選択しない --</option>
+                        {yearChoices.map((y) => (
+                          <option key={y.value} value={y.value}>{y.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ flex: 2 }}>
+                      <label>作物</label>
+                      <select
+                        value={formData.crop_name}
+                        onChange={(e) => setFormData({ ...formData, crop_name: e.target.value })}
+                        disabled={!formData.crop_year}
+                      >
+                        <option value="">-- 選択しない --</option>
+                        {crops.map((c) => (
+                          <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                            {c.custom_name || c.name || c.crop_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {drawnArea > 0 && (
+                  <div className="drawn-area-info">
+                    <strong>描画した面積:</strong> {(drawnArea / 10000).toFixed(4)} ha ({(drawnArea / 100).toFixed(2)} a)
+                  </div>
+                )}
+
+                <button type="submit" className="btn-primary btn-large">
+                  ✅ 登録
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
 
       {/* 登録済みほ場一覧 */}
       <div className="fields-section">
-        <h2>📋 登録済みほ場一覧</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h2 style={{ margin: 0 }}>📋 登録済みほ場一覧</h2>
+          {fields.some((f) => !f.district && f.coordinates_json) && (
+            <button
+              onClick={handleFillDistricts}
+              className="btn-secondary"
+              disabled={isFillingDistricts}
+            >
+              {isFillingDistricts ? '⏳ 取得中...' : '📍 地区名を一括補完'}
+            </button>
+          )}
+        </div>
         {isLoading ? (
           <p>読み込み中...</p>
         ) : fields.length === 0 ? (
@@ -1150,7 +1212,7 @@ export default function FieldRegister() {
                 <th>ほ場名</th>
                 <th>地区</th>
                 <th>面積(ha)</th>
-                <th>禁止</th>
+                <th>制限</th>
               </tr>
             </thead>
             <tbody>
@@ -1164,7 +1226,7 @@ export default function FieldRegister() {
                   <td>{field.field_name || '-'}</td>
                   <td>{field.district || '-'}</td>
                   <td>{field.area_ha?.toFixed(2) || '-'}</td>
-                  <td>{field.beet_forbidden ? '🚫' : '-'}</td>
+                  <td>{field.beet_forbidden ? '🚫てんさい/馬鈴薯' : '-'}</td>
                 </tr>
               ))}
             </tbody>

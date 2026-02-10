@@ -3,7 +3,7 @@
  * Leaflet + leaflet-draw によるポリゴン描画・編集
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
@@ -25,7 +25,7 @@ const DEFAULT_LAT = 42.919253;
 const DEFAULT_LNG = 141.574635;
 const DEFAULT_ZOOM = 14;
 
-export default function FieldMap({
+const FieldMap = forwardRef(function FieldMap({
   fields = [],
   onPolygonCreated,
   onFieldClick,
@@ -34,7 +34,7 @@ export default function FieldMap({
   fudePolygons = [],
   showFudePolygons = false,
   previewPolygons = [],
-}) {
+}, ref) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const drawnItemsRef = useRef(null);
@@ -388,16 +388,24 @@ export default function FieldMap({
     return mapInstanceRef.current.getZoom();
   }, []);
 
-  // ref経由でメソッドを公開
-  useEffect(() => {
-    if (mapRef.current) {
-      mapRef.current.moveToLocation = moveToLocation;
-      mapRef.current.clearDrawing = clearDrawing;
-      mapRef.current.setPolygon = setPolygon;
-      mapRef.current.getBounds = getBounds;
-      mapRef.current.getZoom = getZoom;
+  // ほ場にフィット（座標配列からboundsを計算してズーム）
+  const fitToCoords = useCallback((coords) => {
+    if (!mapInstanceRef.current || !coords || coords.length < 3) return;
+    const bounds = L.latLngBounds(coords.map((c) => [c[0], c[1]]));
+    if (bounds.isValid()) {
+      mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 17 });
     }
-  }, [moveToLocation, clearDrawing, setPolygon, getBounds, getZoom]);
+  }, []);
+
+  // ref経由でメソッドを公開（useImperativeHandle）
+  useImperativeHandle(ref, () => ({
+    moveToLocation,
+    clearDrawing,
+    setPolygon,
+    getBounds,
+    getZoom,
+    fitToCoords,
+  }), [moveToLocation, clearDrawing, setPolygon, getBounds, getZoom, fitToCoords]);
 
   return (
     <div className="field-map-container">
@@ -411,4 +419,6 @@ export default function FieldMap({
       )}
     </div>
   );
-}
+});
+
+export default FieldMap;

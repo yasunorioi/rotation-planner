@@ -5,13 +5,14 @@ FastAPI を使用した REST API。
 認証は JWT トークン、データは SQLite に保存。
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 import sys
 import os
@@ -71,24 +72,9 @@ from api.inventory_api import router as inventory_router, create_inventory_route
 # アプリケーション設定
 # =============================================================================
 
-app = FastAPI(
-    title="農業管理アプリ API",
-    description="輪作計画・ほ場管理のREST API",
-    version="2.0.0"
-)
-
-# CORS設定（開発環境用）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 起動時にテーブル初期化
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app):
+    # 起動時にテーブル初期化
     ensure_crop_tables()
     ensure_inventory_tables()
     # FAMIC自動更新チェック（半年経過していれば更新）
@@ -99,6 +85,23 @@ def startup_event():
             print(f"FAMIC data auto-updated: {result.get('basic_count', 0)} records")
     except Exception as e:
         print(f"FAMIC auto-update check failed: {e}")
+    yield
+
+app = FastAPI(
+    title="農業管理アプリ API",
+    description="輪作計画・ほ場管理のREST API",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# CORS設定（開発環境用）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # JWT設定
 JWT_SECRET = os.environ.get("JWT_SECRET")
@@ -423,7 +426,7 @@ def create_token(user_id: int, username: str, role: str) -> str:
         "sub": str(user_id),
         "username": username,
         "role": role,
-        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -3129,7 +3132,7 @@ def get_dashboard_stats(current_user: Dict = Depends(get_current_user)):
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 # =============================================================================

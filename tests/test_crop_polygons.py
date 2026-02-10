@@ -311,7 +311,7 @@ class TestCropPolygonAPI:
     @pytest.fixture
     def client(self):
         """テスト用FastAPIクライアント"""
-        os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing")
+        os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-32bytes!")
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from api.main import app
@@ -322,13 +322,13 @@ class TestCropPolygonAPI:
     def auth_headers(self):
         """認証ヘッダー取得（JWTトークンを直接生成）"""
         import jwt
-        from datetime import datetime, timedelta
-        secret = os.environ.get("JWT_SECRET", "test-secret-key-for-testing")
+        from datetime import datetime, timedelta, timezone
+        secret = os.environ.get("JWT_SECRET", "test-secret-key-for-testing-32bytes!")
         payload = {
             "sub": "1",
             "username": "testuser",
             "role": "admin",
-            "exp": datetime.utcnow() + timedelta(hours=1)
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         token = jwt.encode(payload, secret, algorithm="HS256")
         return {"Authorization": f"Bearer {token}"}

@@ -83,7 +83,10 @@ async def lifespan(app):
     # ロギング設定
     from api.logging_config import setup_api_logging
     setup_api_logging()
-    # 起動時にテーブル初期化
+    # 起動時にDB初期化（スキーマ全体 + 初期ユーザー + 初期組織）
+    from rotation_planner.common.db import init_db
+    init_db()
+    # 追加テーブル初期化（マイグレーション）
     ensure_crop_tables()
     ensure_inventory_tables()
     # FAMIC自動更新チェック（半年経過していれば更新）

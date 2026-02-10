@@ -92,7 +92,7 @@ class TestBuildConstraintsTable:
 
     def test_cn04_normal_build(self):
         """CN-04: 正常構築 → DataFrame"""
-        crops = ["大豆", "てんさい", "春小麦"]
+        crops = ["だいず", "てんさい", "小麦(春播)"]
         df = build_constraints_table(crops)
 
         assert isinstance(df, pd.DataFrame)
@@ -102,9 +102,9 @@ class TestBuildConstraintsTable:
         assert "min_gap_years" in df.columns
         assert "min_fields" in df.columns
         assert "max_fields" in df.columns
-        # 大豆のcap_haがDEFAULT_CONSTRAINTSと一致
-        soy_row = df[df["crop"] == "大豆"].iloc[0]
-        assert soy_row["cap_ha"] == DEFAULT_CONSTRAINTS["大豆"]["cap_ha"]
+        # だいずのcap_haがDEFAULT_CONSTRAINTSと一致
+        soy_row = df[df["crop"] == "だいず"].iloc[0]
+        assert soy_row["cap_ha"] == DEFAULT_CONSTRAINTS["だいず"]["cap_ha"]
 
     def test_cn05_empty_list(self):
         """CN-05: 空リスト → 空DataFrame"""

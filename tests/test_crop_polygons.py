@@ -53,71 +53,30 @@ SAMPLE_GEOJSON_DICT = {
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    """各テスト前にDBを初期化"""
-    with get_db() as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE IF EXISTS crop_polygons")
-        conn.execute("DROP TABLE IF EXISTS fields")
-        conn.execute("DROP TABLE IF EXISTS users")
-        conn.execute("DROP TABLE IF EXISTS organizations")
-        conn.commit()
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS organizations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL, type TEXT DEFAULT 'farm'
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                org_id INTEGER, role TEXT DEFAULT 'user',
-                FOREIGN KEY (org_id) REFERENCES organizations(id)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS fields (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                field_code TEXT,
-                area REAL DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
-        conn.commit()
+def setup_db(test_db):
+    """各テスト前にDBを初期化（test_dbフィクスチャで独立DB使用）"""
     ensure_crop_polygons_table()
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO organizations (id, name, type) VALUES (1, 'テスト組織', 'farm')"
+            "INSERT OR IGNORE INTO organizations (id, name, type) VALUES (1, 'テスト組織', 'JA')"
         )
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, org_id, role) VALUES (1, 'testuser', 'hash', 1, 'admin')"
+            "INSERT OR IGNORE INTO users (id, username, password_hash, display_name, org_id, role) VALUES (1, 'testuser', 'hash', 'テストユーザー', 1, 'admin')"
         )
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, org_id, role) VALUES (2, 'otheruser', 'hash', 1, 'user')"
+            "INSERT OR IGNORE INTO users (id, username, password_hash, display_name, org_id, role) VALUES (2, 'otheruser', 'hash', '他ユーザー', 1, 'farmer')"
         )
         conn.execute(
-            "INSERT INTO fields (id, user_id, name, field_code, area) VALUES (1, 1, 'テスト圃場A', 'F001', 1.0)"
+            "INSERT OR IGNORE INTO fields (id, user_id, name, field_code, area_ha) VALUES (1, 1, 'テスト圃場A', 'F001', 1.0)"
         )
         conn.execute(
-            "INSERT INTO fields (id, user_id, name, field_code, area) VALUES (2, 1, 'テスト圃場B', 'F002', 2.0)"
+            "INSERT OR IGNORE INTO fields (id, user_id, name, field_code, area_ha) VALUES (2, 1, 'テスト圃場B', 'F002', 2.0)"
         )
         conn.execute(
-            "INSERT INTO fields (id, user_id, name, field_code, area) VALUES (3, 2, '他ユーザー圃場', 'F003', 1.5)"
+            "INSERT OR IGNORE INTO fields (id, user_id, name, field_code, area_ha) VALUES (3, 2, '他ユーザー圃場', 'F003', 1.5)"
         )
         conn.commit()
     yield
-    with get_db() as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE IF EXISTS crop_polygons")
-        conn.execute("DROP TABLE IF EXISTS fields")
-        conn.execute("DROP TABLE IF EXISTS users")
-        conn.execute("DROP TABLE IF EXISTS organizations")
-        conn.commit()
 
 
 # =============================================================================
@@ -352,6 +311,7 @@ class TestCropPolygonAPI:
     @pytest.fixture
     def client(self):
         """テスト用FastAPIクライアント"""
+        os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing")
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from api.main import app

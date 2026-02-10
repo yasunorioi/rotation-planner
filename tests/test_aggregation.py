@@ -78,56 +78,23 @@ POLY_D = json.dumps({
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    """各テスト前にDBを初期化（DROP+CREATE方式）"""
+def setup_db(test_db):
+    """各テスト前にDBを初期化（test_dbフィクスチャで独立DB使用）"""
     with get_db() as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
-        for tbl in ['paddy_polygons', 'crop_polygons', 'fields', 'users',
-                     'organizations', 'crop_master', 'user_crops', '_migration_log']:
-            conn.execute(f"DROP TABLE IF EXISTS {tbl}")
-        conn.commit()
-    with get_db() as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS organizations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL CHECK (type IN ('JA', 'cooperative', 'individual')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                org_id INTEGER, role TEXT DEFAULT 'user',
-                FOREIGN KEY (org_id) REFERENCES organizations(id)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS fields (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                field_code TEXT,
-                area REAL DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
         conn.execute(
-            "INSERT INTO organizations (id, name, type) VALUES (1, 'テストJA', 'JA')"
+            "INSERT OR IGNORE INTO organizations (id, name, type) VALUES (1, 'テストJA', 'JA')"
         )
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, org_id, role) "
-            "VALUES (1, 'testuser', 'hash', 1, 'admin')"
+            "INSERT OR IGNORE INTO users (id, username, password_hash, display_name, org_id, role) "
+            "VALUES (1, 'testuser', 'hash', 'テストユーザー', 1, 'admin')"
         )
         conn.execute(
-            "INSERT INTO fields (id, user_id, name, field_code, area) "
+            "INSERT OR IGNORE INTO fields (id, user_id, name, field_code, area_ha) "
             "VALUES (1, 1, 'テスト圃場', 'F001', 1.0)"
         )
         conn.execute(
-            "INSERT INTO fields (id, user_id, name, field_code, area) "
+            "INSERT OR IGNORE INTO fields (id, user_id, name, field_code, area_ha) "
             "VALUES (2, 1, 'テスト圃場2', 'F002', 2.0)"
         )
         conn.commit()

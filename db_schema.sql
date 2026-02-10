@@ -272,3 +272,149 @@ CREATE TABLE IF NOT EXISTS crop_polygons (
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_crop_polygons_field_id_year ON crop_polygons(field_id, year);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 13. 作物マスタ（FAMIC表記 + Gradio版表記の両方を保持）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS crop_master (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    category TEXT,
+    family TEXT DEFAULT NULL,
+    display_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 初期作物データ（FAMIC表記 + Gradio版表記 + ensure_crop_tables互換）
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('小麦(春播)', '穀物', 'イネ科', 1);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('小麦(秋播)', '穀物', 'イネ科', 2);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('だいず', '豆類', 'マメ科', 3);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('てんさい', '根菜', 'アカザ科', 4);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('ばれいしょ', '根菜', 'ナス科', 5);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('あずき', '豆類', 'マメ科', 6);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('たまねぎ', '野菜', 'ユリ科', 7);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('にんじん', '野菜', 'セリ科', 8);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('かぼちゃ', '野菜', 'ウリ科', 9);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('スイートコーン', '穀物', 'イネ科', 10);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('春小麦', '穀物', 'イネ科', 11);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('秋小麦', '穀物', 'イネ科', 12);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('大豆', '豆類', 'マメ科', 13);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('馬鈴薯', '根菜', 'ナス科', 14);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('デントコーン', '穀物', 'イネ科', 15);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('WCS', '穀物', 'イネ科', 16);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('キャベツ', '野菜', 'アブラナ科', 17);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('だいこん', '野菜', 'アブラナ科', 18);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 14. ユーザー作物
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS user_crops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    parent_crop_id INTEGER NOT NULL,
+    custom_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (parent_crop_id) REFERENCES crop_master(id),
+    UNIQUE(user_id, parent_crop_id, custom_name)
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 15. 農薬登録情報（FAMICデータ）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS pesticide_registry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    registration_number TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    category TEXT,
+    type TEXT,
+    active_ingredient TEXT,
+    manufacturer TEXT,
+    formulation TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_pesticide_registry_name ON pesticide_registry(name);
+CREATE INDEX IF NOT EXISTS idx_pesticide_registry_reg_no ON pesticide_registry(registration_number);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 16. 農薬適用情報（FAMICデータ）
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS pesticide_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pesticide_id INTEGER NOT NULL,
+    crop TEXT NOT NULL,
+    target TEXT,
+    purpose TEXT,
+    dilution_rate TEXT,
+    spray_volume TEXT,
+    usage_timing TEXT,
+    usage_count TEXT,
+    application_method TEXT,
+    total_usage_count TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pesticide_id) REFERENCES pesticide_registry(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pesticide_usage_pesticide ON pesticide_usage(pesticide_id);
+CREATE INDEX IF NOT EXISTS idx_pesticide_usage_crop ON pesticide_usage(crop);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 17. 防除記録
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS pesticide_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    field_id INTEGER NOT NULL,
+    spray_date DATE NOT NULL,
+    pesticide_name TEXT NOT NULL,
+    pesticide_id INTEGER,
+    dilution_rate TEXT,
+    spray_amount REAL,
+    spray_unit TEXT,
+    photo_path TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (field_id) REFERENCES fields(id) ON DELETE CASCADE,
+    FOREIGN KEY (pesticide_id) REFERENCES pesticide_registry(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pesticide_records_user ON pesticide_records(user_id);
+CREATE INDEX IF NOT EXISTS idx_pesticide_records_field ON pesticide_records(field_id);
+CREATE INDEX IF NOT EXISTS idx_pesticide_records_date ON pesticide_records(spray_date);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 18. FAMICインポート履歴
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS famic_import_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_type TEXT NOT NULL,
+    file_name TEXT,
+    record_count INTEGER,
+    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- 19. 農薬発注
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS pesticide_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    rotation_plan_id INTEGER,
+    target_year TEXT NOT NULL,
+    area_unit TEXT NOT NULL DEFAULT 'ha',
+    order_data_json TEXT,
+    status TEXT DEFAULT 'draft',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (rotation_plan_id) REFERENCES rotation_plans(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pesticide_orders_user_id ON pesticide_orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_pesticide_orders_target_year ON pesticide_orders(target_year);

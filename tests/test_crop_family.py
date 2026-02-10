@@ -15,23 +15,10 @@ from rotation_planner.common.db_access import (
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    """各テスト前にDBを初期化"""
-    # 既存テーブルを削除
-    with get_db() as conn:
-        conn.execute("DROP TABLE IF EXISTS user_crops")
-        conn.execute("DROP TABLE IF EXISTS crop_master")
-        conn.execute("DROP TABLE IF EXISTS _migration_log")
-        conn.commit()
-    # テーブル再作成
+def setup_db(test_db):
+    """各テスト前にDBを初期化（test_dbフィクスチャで独立DB使用）"""
     ensure_crop_tables()
     yield
-    # テスト後クリーンアップ
-    with get_db() as conn:
-        conn.execute("DROP TABLE IF EXISTS user_crops")
-        conn.execute("DROP TABLE IF EXISTS crop_master")
-        conn.execute("DROP TABLE IF EXISTS _migration_log")
-        conn.commit()
 
 
 class TestCropFamilyInitialData:

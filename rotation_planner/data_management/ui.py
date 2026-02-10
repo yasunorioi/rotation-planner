@@ -234,7 +234,8 @@ def import_rotation_plan_csv(
 
         for idx, row in df.iterrows():
             row_num = idx + 2  # ヘッダー行を考慮
-            crop = str(row.get("crop", "")).strip()
+            raw_crop = row.get("crop", "")
+            crop = "" if pd.isna(raw_crop) else str(raw_crop).strip()
 
             # 1. 作物が空欄 → エラー
             if not crop:
@@ -301,8 +302,10 @@ def import_rotation_plan_csv(
         # 計画詳細を作成
         details = []
         for _, row in df.iterrows():
+            field_code = str(row.get("field_code", "")).strip()
             details.append({
-                "field_code": str(row.get("field_code", "")).strip(),
+                "field_id": field_code_to_id.get(field_code),
+                "field_code": field_code,
                 "field_name": str(row.get("field_name", "")).strip(),
                 "district": str(row.get("district", "")).strip(),
                 "year": str(row.get("year", "")).strip(),
@@ -315,8 +318,12 @@ def import_rotation_plan_csv(
         # 計画を保存
         plan_id = PlanRepository.create_plan(
             user_id=user_id,
-            name=plan_name.strip(),
-            details=details
+            data={
+                'name': plan_name.strip(),
+                'start_year': '',
+                'end_year': '',
+                'details': details
+            }
         )
 
         # 結果メッセージを作成

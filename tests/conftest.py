@@ -40,6 +40,14 @@ if _schema_path.exists():
         _conn.executescript(_f.read())
     _conn.close()
     _db_mod2.init_db()
+    # テスト用シードデータ: FK参照先として必要な最低限のレコード
+    _conn = sqlite3.connect(_shared_test_db_path)
+    _conn.execute(
+        "INSERT OR IGNORE INTO rotation_plans (id, user_id, name, start_year, end_year) "
+        "VALUES (1, 3, 'テスト計画', 'R6', 'R10')"
+    )
+    _conn.commit()
+    _conn.close()
 
 
 # ============================================================
@@ -84,6 +92,15 @@ def test_db(monkeypatch):
 
     # init_db()で初期ユーザー作成
     db.init_db()
+
+    # テスト用シードデータ: FK参照先として必要な最低限のレコード
+    seed_conn = sqlite3.connect(str(temp_db_path))
+    seed_conn.execute(
+        "INSERT OR IGNORE INTO rotation_plans (id, user_id, name, start_year, end_year) "
+        "VALUES (1, 3, 'テスト計画', 'R6', 'R10')"
+    )
+    seed_conn.commit()
+    seed_conn.close()
 
     yield temp_db_path
 

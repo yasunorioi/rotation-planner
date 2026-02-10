@@ -263,21 +263,26 @@ class TestPesticideRecordRepository:
 class TestFAMICImporter:
     """FAMICインポーターのテスト"""
 
+    def _get_test_db_path(self):
+        """共有テストDBのパスを取得"""
+        from rotation_planner.common import db_access
+        return str(db_access.DB_PATH)
+
     def test_get_import_stats_returns_dict(self):
         """get_import_stats() が辞書を返すこと"""
-        stats = get_import_stats()
+        stats = get_import_stats(db_path=self._get_test_db_path())
         assert isinstance(stats, dict)
 
     def test_get_import_stats_keys(self):
         """get_import_stats() に必要なキーがあること"""
-        stats = get_import_stats()
+        stats = get_import_stats(db_path=self._get_test_db_path())
         expected_keys = ["registry_count", "usage_count", "last_basic_import", "last_usage_import"]
         for key in expected_keys:
             assert key in stats, f"キー '{key}' がありません"
 
     def test_get_import_stats_types(self):
         """get_import_stats() の値の型が正しいこと"""
-        stats = get_import_stats()
+        stats = get_import_stats(db_path=self._get_test_db_path())
         assert isinstance(stats["registry_count"], int)
         assert isinstance(stats["usage_count"], int)
         # last_*_import は str または None

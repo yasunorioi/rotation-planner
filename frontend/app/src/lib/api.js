@@ -150,6 +150,14 @@ export const fieldApi = {
     });
     return res.data;
   },
+  previewKml: async (formData) => {
+    const res = await api.post('/api/fields/preview-kml', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
 };
 
 // =============================================================================

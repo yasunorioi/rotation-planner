@@ -392,39 +392,7 @@ export default function FieldRegister() {
   // ============================================
 
   /**
-   * ポリゴン座標から面積を計算（Shoelace formula）
-   * @param {Array} coords - [[lat, lng], ...] 形式の座標配列
-   * @returns {number} 面積（平方メートル）
-   */
-  const calculatePolygonArea = (coords) => {
-    if (!coords || coords.length < 3) return 0;
-
-    // 緯度経度を平面座標に変換（簡易計算）
-    const R = 6371000; // 地球の半径（メートル）
-    const toRad = (deg) => (deg * Math.PI) / 180;
-
-    // 中心点を基準に変換
-    const centerLat = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
-    const centerLng = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
-
-    const points = coords.map((c) => ({
-      x: R * toRad(c[1] - centerLng) * Math.cos(toRad(centerLat)),
-      y: R * toRad(c[0] - centerLat),
-    }));
-
-    // Shoelace formula
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-      const j = (i + 1) % points.length;
-      area += points[i].x * points[j].y;
-      area -= points[j].x * points[i].y;
-    }
-
-    return Math.abs(area / 2);
-  };
-
-  /**
-   * KMLファイルを解析してプレビューデータを生成
+   * KML/KMZファイルをサーバーで解析してプレビューデータを生成
    */
   const handleParseKml = async () => {
     if (!importFile) {
@@ -432,69 +400,31 @@ export default function FieldRegister() {
       return;
     }
 
-    const ext = importFile.name.toLowerCase().split('.').pop();
-    if (ext === 'kmz') {
-      setMessage({ type: 'error', text: 'KMZファイルはプレビュー編集に対応していません。KMLファイルに変換するか、直接インポートをお使いください。' });
-      return;
-    }
-
     setIsParsing(true);
     setMessage(null);
 
     try {
-      const text = await importFile.text();
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(text, 'text/xml');
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const response = await fieldApi.previewKml(formData);
 
-      // パースエラーチェック
-      const parseError = xmlDoc.querySelector('parsererror');
-      if (parseError) {
-        throw new Error('KMLファイルの形式が正しくありません');
-      }
-
-      const placemarks = xmlDoc.querySelectorAll('Placemark');
-      if (placemarks.length === 0) {
-        setMessage({ type: 'info', text: 'KMLファイルからほ場データを抽出できませんでした。' });
+      const parsedFields = response.fields || [];
+      if (parsedFields.length === 0) {
+        setMessage({ type: 'info', text: 'ファイルからほ場データを抽出できませんでした。' });
         setIsParsing(false);
         return;
       }
 
       const previewData = [];
       const coordsData = [];
+      const existingIds = new Set(fields.map((f) => f.field_code));
 
-      placemarks.forEach((placemark, idx) => {
-        const name = placemark.querySelector('name')?.textContent || `ほ場${idx + 1}`;
-        const description = placemark.querySelector('description')?.textContent || '';
-
-        // ポリゴン座標を抽出
-        const polygon = placemark.querySelector('Polygon');
-        if (!polygon) return;
-
-        const coordsText = polygon.querySelector('coordinates')?.textContent || '';
-        if (!coordsText.trim()) return;
-
-        // 座標をパース: "lng,lat,alt lng,lat,alt ..." → [[lat, lng], ...]
-        const coords = coordsText
-          .trim()
-          .split(/\s+/)
-          .map((point) => {
-            const parts = point.split(',');
-            if (parts.length >= 2) {
-              return [parseFloat(parts[1]), parseFloat(parts[0])]; // [lat, lng]
-            }
-            return null;
-          })
-          .filter((c) => c !== null && !isNaN(c[0]) && !isNaN(c[1]));
-
-        if (coords.length < 3) return;
-
-        // 面積計算
-        const areaM2 = calculatePolygonArea(coords);
-        const areaHa = areaM2 / 10000;
-        const areaA = areaM2 / 100;
+      parsedFields.forEach((pf, idx) => {
+        const name = pf.name || `ほ場${idx + 1}`;
+        const coords = pf.coordinates || [];
+        const areaHa = pf.area_ha || 0;
 
         // ほ場IDを生成（既存ほ場との重複回避）
-        const existingIds = new Set(fields.map((f) => f.field_code));
         let fieldId = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 20) || `KML${idx + 1}`;
         let suffix = 1;
         const baseId = fieldId;
@@ -506,7 +436,7 @@ export default function FieldRegister() {
           field_id: fieldId,
           field_name: name,
           area_ha: areaHa,
-          area_a: areaA,
+          area_a: areaHa * 100,
           crop: '',
           beet_forbidden: false,
         });
@@ -517,16 +447,13 @@ export default function FieldRegister() {
         });
       });
 
-      if (previewData.length === 0) {
-        setMessage({ type: 'info', text: 'KMLファイルからポリゴンデータを抽出できませんでした。' });
-      } else {
-        setKmlPreviewData(previewData);
-        setKmlCoordsData(coordsData);
-        setMessage({ type: 'success', text: `${previewData.length}件のほ場を検出しました。作物・てんさい禁止を設定して登録してください。` });
-      }
+      setKmlPreviewData(previewData);
+      setKmlCoordsData(coordsData);
+      setMessage({ type: 'success', text: `${previewData.length}件のほ場を検出しました。作物・てんさい禁止を設定して登録してください。` });
     } catch (err) {
       console.error('KML parse error:', err);
-      setMessage({ type: 'error', text: `KML解析エラー: ${err.message}` });
+      const detail = err.response?.data?.detail || err.message || '不明なエラー';
+      setMessage({ type: 'error', text: `解析エラー: ${detail}` });
     } finally {
       setIsParsing(false);
     }
@@ -895,21 +822,19 @@ export default function FieldRegister() {
               </div>
             )}
             <div className="button-group">
-              {/* KMLファイル: プレビュー編集モード */}
               <button
                 onClick={handleParseKml}
                 className="btn-primary"
-                disabled={!importFile || isParsing || importFile?.name?.toLowerCase().endsWith('.kmz')}
-                title="KMLファイルを解析してプレビュー表示"
+                disabled={!importFile || isParsing}
+                title="KML/KMZファイルを解析してプレビュー表示"
               >
                 {isParsing ? '⏳ 解析中...' : '📋 プレビュー'}
               </button>
-              {/* KMZファイル: 直接インポート */}
               <button
                 onClick={handleImportKml}
                 className="btn-secondary"
                 disabled={!importFile || isImporting}
-                title="直接インポート（KMZ用）"
+                title="プレビューなしで直接インポート"
               >
                 {isImporting ? '⏳ 処理中...' : '📤 直接インポート'}
               </button>

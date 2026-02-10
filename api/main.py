@@ -1136,6 +1136,48 @@ async def import_kml(
     return KmlImportResponse(imported_fields=imported_fields, errors=errors)
 
 
+@app.post("/api/fields/preview-kml")
+async def preview_kml(
+    file: UploadFile = File(...),
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    KML/KMZファイルをパースしてプレビュー用データを返す（DB登録しない）
+    """
+    filename = file.filename or ""
+    ext = filename.lower().split('.')[-1] if '.' in filename else ""
+    if ext not in ['kml', 'kmz']:
+        raise HTTPException(
+            status_code=400,
+            detail="KMLまたはKMZファイルをアップロードしてください"
+        )
+
+    try:
+        file_bytes = await file.read()
+        parsed_fields = parse_kml_or_kmz_bytes(file_bytes, filename)
+
+        if not parsed_fields:
+            return {"fields": [], "count": 0}
+
+        result = []
+        for i, pf in enumerate(parsed_fields, 1):
+            coords = pf.get("coordinates", [])
+            if len(coords) < 3:
+                continue
+            result.append({
+                "name": pf.get("name", f"ほ場{i}"),
+                "coordinates": coords,
+                "area_ha": pf.get("area_ha", 0.0),
+                "area_m2": pf.get("area_m2", 0.0),
+            })
+
+        return {"fields": result, "count": len(result)}
+
+    except Exception as e:
+        logger.error("KMLプレビュー処理エラー: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="ファイルの処理に失敗しました")
+
+
 # =============================================================================
 # 筆ポリゴンエンドポイント
 # =============================================================================

@@ -180,7 +180,7 @@ def parse_constraints_table(df: pd.DataFrame) -> Tuple[Dict, Dict, Dict, Dict, D
             try:
                 val = float(min_ha)
                 crop_mins[crop] = val if val > 0 else None
-            except ValueError:
+            except (ValueError, TypeError):
                 crop_mins[crop] = None
         else:
             crop_mins[crop] = None
@@ -191,7 +191,7 @@ def parse_constraints_table(df: pd.DataFrame) -> Tuple[Dict, Dict, Dict, Dict, D
             try:
                 val = float(cap)
                 crop_caps[crop] = val if val > 0 else None
-            except ValueError:
+            except (ValueError, TypeError):
                 crop_caps[crop] = None
         else:
             crop_caps[crop] = None
@@ -200,14 +200,14 @@ def parse_constraints_table(df: pd.DataFrame) -> Tuple[Dict, Dict, Dict, Dict, D
         gap = row.get('min_gap_years', 0)
         try:
             min_gap[crop] = int(gap) if pd.notna(gap) and str(gap).strip() != '' else 0
-        except ValueError:
+        except (ValueError, TypeError):
             min_gap[crop] = 0
 
         # min_fields
         minf = row.get('min_fields', 0)
         try:
             min_f[crop] = int(minf) if pd.notna(minf) and str(minf).strip() != '' else 0
-        except ValueError:
+        except (ValueError, TypeError):
             min_f[crop] = 0
 
         # max_fields (0は無制限として扱う)
@@ -216,7 +216,7 @@ def parse_constraints_table(df: pd.DataFrame) -> Tuple[Dict, Dict, Dict, Dict, D
             try:
                 val = int(maxf)
                 max_f[crop] = val if val > 0 else None
-            except ValueError:
+            except (ValueError, TypeError):
                 max_f[crop] = None
         else:
             max_f[crop] = None
@@ -261,7 +261,7 @@ def parse_preferred_transitions(text: str) -> Dict[Tuple[str, str], float]:
                     weight = float(weight_part.strip())
                     if from_crop and to_crop:
                         transitions[(from_crop, to_crop)] = weight
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
 
     return transitions

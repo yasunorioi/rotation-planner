@@ -23,6 +23,9 @@ from rotation_planner.pesticide import create_pesticide_order_ui
 from rotation_planner.pesticide.ja_staff_ui import create_ja_staff_summary_ui
 from rotation_planner.pesticide_record import create_pesticide_record_ui, load_initial_fields
 from rotation_planner.field import create_field_register_ui, create_crop_settings_ui, create_field_list_ui
+from rotation_planner.field.paddy_ui import create_paddy_polygon_ui
+from rotation_planner.field.crop_polygon_ui import create_crop_polygon_ui
+from rotation_planner.field.aggregation_ui import create_aggregation_ui
 from rotation_planner.field.crud import get_fields_with_history
 from rotation_planner.data_management import create_data_management_ui
 # 作付履歴はほ場一覧に統合されたため削除
@@ -300,6 +303,24 @@ def create_app():
                 field_list_components = create_field_list_ui(user_state)
 
             # =================================================================
+            # 🏞️ 水田ポリゴンタブ（farmer, ja_staff, admin）
+            # =================================================================
+            with gr.TabItem("🏞️ 水田ポリゴン", id="paddy_polygon"):
+                paddy_components = create_paddy_polygon_ui(user_state)
+
+            # =================================================================
+            # 🌾 作付けポリゴンタブ（farmer, ja_staff, admin）
+            # =================================================================
+            with gr.TabItem("🌾 作付けポリゴン", id="crop_polygon"):
+                crop_polygon_components = create_crop_polygon_ui(user_state)
+
+            # =================================================================
+            # 📊 面積集計タブ（farmer, ja_staff, admin）
+            # =================================================================
+            with gr.TabItem("📊 面積集計", id="aggregation"):
+                aggregation_components = create_aggregation_ui(user_state)
+
+            # =================================================================
             # 🌾 輪作計画タブ（farmer, ja_staff, admin）
             # =================================================================
             with gr.TabItem("🌾 輪作計画", id="rotation") as rotation_tab:
@@ -362,6 +383,13 @@ def create_app():
                         tensai_required = gr.Checkbox(value=False, label="てんさい必須（毎年1ほ場以上）")
                         infer_unknown = gr.Checkbox(value=True, label="空欄を推論で補完（*マーク付き）")
                         district_grouping = gr.Checkbox(value=True, label="地区まとめを優先")
+
+                        gr.Markdown("### PRO機能")
+                        adjacent_family_enabled = gr.Checkbox(
+                            value=False,
+                            label="[PRO] 隣接筆の同一科制約",
+                            info="隣接するほ場に同じ科の作物を配置しないよう制約を追加"
+                        )
 
                         gr.Markdown("## 🌱 作物マスター")
                         crop_text = gr.Textbox(
@@ -502,6 +530,7 @@ def create_app():
                     inputs=[n_years, crop_text, constraints_table,
                             forbidden_text, preferred_text, main_crops_text, unknown_mode,
                             tensai_required, precision_mode, infer_unknown, district_grouping,
+                            adjacent_family_enabled,
                             fields_state, past_years_state],
                     outputs=[result_table, summary_table, csv_download, message_box_rotation]
                 )
@@ -677,6 +706,30 @@ def create_app():
             message = f"✅ {len(fields)}件のほ場（{len(past_years)}年分の履歴）"
             return fields, past_years, message, crops_text, constraints_df, forbidden, preferred, main_crops
 
+        # 水田ポリゴンタブの初期化
+        def init_paddy_tab(user_state_dict):
+            """水田ポリゴンタブの初期化（ほ場選択肢 + 空テーブル）"""
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                import pandas as pd
+                return gr.Dropdown(choices=[], value=None), pd.DataFrame(columns=['ID', 'ほ場ID', '面積(ha)', '地目', '畑地化開始年', 'ソース']), ""
+            return paddy_components["load_fn"](user_state_dict)
+
+        # 作付けポリゴンタブの初期化
+        def init_crop_polygon_tab(user_state_dict):
+            """作付けポリゴンタブの初期化（ほ場選択肢を設定）"""
+            from rotation_planner.field.crop_polygon_ui import _get_field_choices
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                return gr.Dropdown(choices=[], value=None)
+            return _get_field_choices(user_state_dict)
+
+        # 面積集計タブの初期化
+        def init_aggregation_tab(user_state_dict):
+            """面積集計タブの初期化（クロス集計 + 補助金サマリ）"""
+            if not user_state_dict or not user_state_dict.get("user_id"):
+                import pandas as pd
+                return pd.DataFrame(), pd.DataFrame(), ""
+            return aggregation_components["load_fn"](user_state_dict)
+
         app.load(
             fn=on_app_load,
             outputs=[user_state, user_header, stats_card, farmers_tab, pesticide_master_tab, admin_tab]
@@ -724,6 +777,28 @@ def create_app():
                 pesticide_record_components["field_dropdown"],
                 pesticide_record_components["history_field_filter"],
                 pesticide_record_components["edit_field_dropdown"],
+            ]
+        ).then(
+            fn=init_paddy_tab,
+            inputs=[user_state],
+            outputs=[
+                paddy_components["field_dropdown"],
+                paddy_components["paddy_table"],
+                paddy_components["message_box"],
+            ]
+        ).then(
+            fn=init_crop_polygon_tab,
+            inputs=[user_state],
+            outputs=[
+                crop_polygon_components["field_dropdown"],
+            ]
+        ).then(
+            fn=init_aggregation_tab,
+            inputs=[user_state],
+            outputs=[
+                aggregation_components["cross_table"],
+                aggregation_components["subsidy_table"],
+                aggregation_components["message_box"],
             ]
         )
 
@@ -777,6 +852,28 @@ def create_app():
                     pesticide_record_components["field_dropdown"],
                     pesticide_record_components["history_field_filter"],
                     pesticide_record_components["edit_field_dropdown"],
+                ]
+            ).then(
+                fn=init_paddy_tab,
+                inputs=[user_state],
+                outputs=[
+                    paddy_components["field_dropdown"],
+                    paddy_components["paddy_table"],
+                    paddy_components["message_box"],
+                ]
+            ).then(
+                fn=init_crop_polygon_tab,
+                inputs=[user_state],
+                outputs=[
+                    crop_polygon_components["field_dropdown"],
+                ]
+            ).then(
+                fn=init_aggregation_tab,
+                inputs=[user_state],
+                outputs=[
+                    aggregation_components["cross_table"],
+                    aggregation_components["subsidy_table"],
+                    aggregation_components["message_box"],
                 ]
             )
 
@@ -838,7 +935,7 @@ def _load_debug_mode() -> bool:
             with open(settings_file, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
                 return settings.get("debug_mode", False)
-        except (json.JSONDecodeError, OSError):
+        except (OSError, json.JSONDecodeError) as e:
             pass
 
     # 3. デフォルトは OFF（本番向け）

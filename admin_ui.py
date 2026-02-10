@@ -18,12 +18,6 @@ from rotation_planner.common import (
     get_admin_count,
     ROLE_ADMIN, ROLE_JA_STAFF, ROLE_FARMER,
 )
-from rotation_planner.famic import (
-    get_import_stats,
-    get_famic_settings,
-    set_famic_settings,
-    download_and_import_all,
-)
 
 # =============================================================================
 # 定数
@@ -224,7 +218,7 @@ def get_system_info() -> str:
     try:
         import gradio
         info.append(f"  - Gradio: {gradio.__version__}")
-    except ImportError:
+    except ImportError as e:
         pass
 
     return "\n".join(info)
@@ -269,7 +263,7 @@ def load_settings() -> Dict[str, Any]:
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, IOError, OSError) as e:
             pass
     return {"debug_mode": False}
 
@@ -295,68 +289,6 @@ def set_debug_mode(enabled: bool) -> str:
 
     status = "ON" if enabled else "OFF"
     return f"✅ デバッグモードを {status} に変更しました。\n※ 変更を反映するにはアプリの再起動が必要です。"
-
-
-# =============================================================================
-# 農薬登録情報（FAMIC）管理
-# =============================================================================
-
-def get_famic_status_display() -> str:
-    """FAMICデータの状態を表示用に取得"""
-    stats = get_import_stats()
-    settings = get_famic_settings()
-
-    lines = ["### 📊 現在の状態", ""]
-
-    if stats["registry_count"] > 0:
-        lines.append(f"**登録農薬数**: {stats['registry_count']:,} 件")
-        lines.append(f"**適用基準数**: {stats['usage_count']:,} 件")
-    else:
-        lines.append("**データなし**: まだインポートされていません")
-
-    lines.append("")
-
-    if stats["last_basic_import"]:
-        lines.append(f"**最終更新**: {stats['last_basic_import'][:19]}")
-    else:
-        lines.append("**最終更新**: なし")
-
-    lines.append("")
-    lines.append("### ⚙️ 自動更新設定")
-    lines.append("")
-
-    if settings["auto_update_enabled"]:
-        lines.append("**状態**: ✅ 有効（半年ごと）")
-        if settings["next_update"]:
-            lines.append(f"**次回更新予定**: {settings['next_update'][:10]}")
-    else:
-        lines.append("**状態**: ❌ 無効")
-
-    return "\n".join(lines)
-
-
-def toggle_famic_auto_update(enabled: bool) -> Tuple[str, str]:
-    """FAMIC自動更新設定を切り替え"""
-    set_famic_settings(auto_update_enabled=enabled)
-
-    status = "有効" if enabled else "無効"
-    result = f"✅ 自動更新を「{status}」に変更しました。"
-
-    return result, get_famic_status_display()
-
-
-def execute_famic_update() -> Tuple[str, str]:
-    """FAMICデータを手動更新"""
-    result = download_and_import_all()
-
-    if result["success"]:
-        msg = f"""✅ 更新完了
-- 登録農薬: {result['basic_count']:,} 件
-- 適用基準: {result['usage_count']:,} 件"""
-    else:
-        msg = f"❌ 更新失敗: {result['error']}"
-
-    return msg, get_famic_status_display()
 
 
 # =============================================================================
@@ -433,7 +365,7 @@ def get_fude_files_list() -> List[List[Any]]:
                     data = json.load(f)
                     if data.get("type") == "FeatureCollection":
                         feature_count = len(data.get("features", []))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, IOError, OSError) as e:
                 pass
 
             files_data.append([
@@ -460,7 +392,7 @@ def get_fude_files_list() -> List[List[Any]]:
                     data = json.load(f)
                     if data.get("type") == "FeatureCollection":
                         feature_count = len(data.get("features", []))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, IOError, OSError) as e:
                 pass
 
             files_data.append([
@@ -748,70 +680,6 @@ def create_admin_ui(current_username: str = "") -> Dict[str, Any]:
             **データ出典:** 農林水産省「筆ポリゴンデータ」
 
             利用規約に従い、出典を明記して利用してください。
-            """)
-
-        # =================================================================
-        # 農薬登録情報（FAMIC）タブ
-        # =================================================================
-        with gr.TabItem("💊 農薬登録情報"):
-            gr.Markdown("""
-            ### 🔄 FAMIC農薬登録情報
-
-            [農林水産消費安全技術センター（FAMIC）](https://www.acis.famic.go.jp/ddata/index.htm)の
-            農薬登録情報をダウンロードしてDBに取り込みます。
-
-            **データ内容:**
-            - 登録基本部: 農薬名、有効成分、製造者等
-            - 登録適用部: 作物ごとの適用基準（希釈倍率、使用時期等）
-
-            ※ 外部サーバー（FAMIC）へのアクセスが発生します。
-            """)
-
-            famic_status = gr.Markdown(value=get_famic_status_display())
-
-            gr.Markdown("---")
-            gr.Markdown("### ⚙️ 設定")
-
-            famic_settings = get_famic_settings()
-            famic_auto_update = gr.Checkbox(
-                label="自動更新を有効にする（半年ごと）",
-                value=famic_settings["auto_update_enabled"],
-                info="ONにすると、半年に1回FAMICから最新データを自動取得します"
-            )
-
-            famic_setting_result = gr.Textbox(label="結果", interactive=False, visible=False)
-
-            famic_auto_update.change(
-                fn=toggle_famic_auto_update,
-                inputs=[famic_auto_update],
-                outputs=[famic_setting_result, famic_status]
-            )
-
-            gr.Markdown("---")
-            gr.Markdown("### 🔄 手動更新")
-
-            gr.Markdown("""
-            「今すぐ更新」をクリックすると、FAMICから最新データをダウンロードしてDBを更新します。
-
-            ⚠️ **注意:**
-            - 数分かかる場合があります
-            - 大量のデータ（約6万件の適用基準）を処理します
-            """)
-
-            famic_update_btn = gr.Button("🔄 今すぐ更新", variant="primary")
-            famic_update_result = gr.Textbox(label="更新結果", interactive=False)
-
-            famic_update_btn.click(
-                fn=execute_famic_update,
-                outputs=[famic_update_result, famic_status]
-            )
-
-            gr.Markdown("---")
-
-            gr.Markdown("""
-            **データ出典:** 農林水産消費安全技術センター（FAMIC）「農薬登録情報提供システム」
-
-            利用規約: https://www.acis.famic.go.jp/ddata/index.htm
             """)
 
     return components

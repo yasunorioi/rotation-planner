@@ -314,7 +314,7 @@ def parse_kml_or_kmz_bytes(file_bytes: bytes, filename: str) -> List[Dict[str, A
             try:
                 content = file_bytes.decode(encoding)
                 return parse_kml_content(content)
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, Exception):
                 continue
 
     return []

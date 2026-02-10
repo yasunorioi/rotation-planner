@@ -25,39 +25,20 @@ UNIT_CONVERSION = {
 # 散布基準: 10a あたり 100L
 SPRAY_VOLUME_PER_10A = 100  # L
 
-# 作物名の正規化マッピング（FAMIC表記に準拠）
-# ユーザー入力 → FAMIC正式名称
+# 作物名の正規化マッピング
 CROP_NORMALIZE = {
-    # てんさい
     "てんさい": "てんさい",
     "ビート": "てんさい",
     "甜菜": "てんさい",
-    # 大豆
-    "だいず": "だいず",
-    "大豆": "だいず",
-    "ダイズ": "だいず",
-    # 小麦
-    "小麦(春播)": "小麦(春播)",
-    "春小麦": "小麦(春播)",
-    "小麦(秋播)": "小麦(秋播)",
-    "秋小麦": "小麦(秋播)",
-    # コーン
+    "テンサイ": "てんさい",
+    "大豆": "大豆",
+    "春小麦": "春小麦",
+    "秋小麦": "秋小麦",
     "デントコーン": "デントコーン",
     "コーン": "デントコーン",
     "WCS": "WCS",
-    # ばれいしょ
-    "ばれいしょ": "ばれいしょ",
-    "馬鈴薯": "ばれいしょ",
-    "バレイショ": "ばれいしょ",
-    "じゃがいも": "ばれいしょ",
-    # 小豆
-    "あずき": "あずき",
-    "小豆": "あずき",
-    "アズキ": "あずき",
-    # たまねぎ
-    "たまねぎ": "たまねぎ",
-    "玉ねぎ": "たまねぎ",
-    "タマネギ": "たまねぎ",
+    "馬鈴薯": "馬鈴薯",
+    "ばれいしょ": "馬鈴薯",
 }
 
 
@@ -97,7 +78,7 @@ def load_rotation_plan(csv_path: str) -> Tuple[pd.DataFrame, List[str], str]:
     """輪作計画CSVを読み込み、ほ場情報と年列を抽出"""
     try:
         df = pd.read_csv(csv_path, encoding='utf-8-sig')
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, LookupError) as e:
         df = pd.read_csv(csv_path, encoding='utf-8')
 
     # 年列を特定（R + 数字、または 📍R + 数字）
@@ -129,7 +110,7 @@ def load_inventory_csv(csv_path: str) -> Tuple[Dict[str, Tuple[float, str]], str
     try:
         try:
             df = pd.read_csv(csv_path, encoding='utf-8-sig')
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, LookupError) as e:
             df = pd.read_csv(csv_path, encoding='utf-8')
 
         # 列名を正規化
@@ -238,7 +219,7 @@ def calculate_pesticide_requirements(
         area_str = str(area).replace('ha', '').replace('a', '').strip()
         try:
             area_val = float(area_str)
-        except ValueError:
+        except (ValueError, TypeError) as e:
             continue
 
         # haに変換
@@ -283,7 +264,7 @@ def calculate_pesticide_requirements(
                     amount_str = str(amount_per_10a).split('+')[0].split('/')[0].split('〜')[0]
                     amount = float(amount_str) * area_10a
                     final_unit = str(unit) if pd.notna(unit) else 'mL'
-                except ValueError:
+                except (ValueError, TypeError, ZeroDivisionError) as e:
                     continue
             elif pd.notna(dilution) and str(dilution).strip() != '':
                 # 希釈倍率指定 → 100L/10a 基準で計算
@@ -293,7 +274,7 @@ def calculate_pesticide_requirements(
                     # 100L/10a ÷ 希釈倍率 × 面積(10a)
                     amount = (SPRAY_VOLUME_PER_10A / dilution_rate) * area_10a * 1000  # mL
                     final_unit = 'mL'
-                except (ValueError, ZeroDivisionError):
+                except (ValueError, TypeError, ZeroDivisionError) as e:
                     continue
             else:
                 continue

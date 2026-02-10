@@ -295,7 +295,7 @@ class PesticideOrder:
 
 
 # =============================================================================
-# 地目区分
+# ほ場登録・面積集計関連
 # =============================================================================
 
 class LandCategory(Enum):
@@ -310,16 +310,89 @@ class LandCategory(Enum):
         return self.value
 
 
-# =============================================================================
-# 面積集計行
-# =============================================================================
+@dataclass
+class PaddyPolygon:
+    """水田ポリゴン"""
+    id: int
+    field_id: int
+    geometry: str  # GeoJSON文字列
+    area_ha: float
+    is_converted: bool
+    conversion_start_year: Optional[int]  # NULL許容
+    source: str  # 'maff' / 'kml' / 'manual'
+    notes: Optional[str]
+    created_at: str
+    updated_at: str
+
+    @property
+    def land_category(self) -> LandCategory:
+        """畑地化フラグに基づく地目"""
+        return LandCategory.CONVERTED if self.is_converted else LandCategory.PADDY
+
+    @property
+    def subsidy_remaining_years(self) -> Optional[int]:
+        """畑地化補助金の残り年数（5年間）。開始年不明ならNone"""
+        if not self.is_converted or self.conversion_start_year is None:
+            return None
+        import datetime
+        current_year = datetime.date.today().year
+        elapsed = current_year - self.conversion_start_year
+        remaining = 5 - elapsed
+        return max(0, remaining)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "PaddyPolygon":
+        """辞書からPaddyPolygonオブジェクトを作成"""
+        return cls(
+            id=d["id"],
+            field_id=d["field_id"],
+            geometry=d["geometry"],
+            area_ha=d["area_ha"],
+            is_converted=bool(d["is_converted"]),
+            conversion_start_year=d.get("conversion_start_year"),
+            source=d.get("source", "manual"),
+            notes=d.get("notes"),
+            created_at=d.get("created_at", ""),
+            updated_at=d.get("updated_at", ""),
+        )
+
+
+@dataclass
+class CropPolygon:
+    """作物ポリゴン"""
+    id: int
+    field_id: int
+    year: int
+    crop_name: str
+    geometry: str  # GeoJSON文字列
+    area_ha: float
+    notes: Optional[str]
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "CropPolygon":
+        """辞書からCropPolygonオブジェクトを作成"""
+        return cls(
+            id=d["id"],
+            field_id=d["field_id"],
+            year=d["year"],
+            crop_name=d["crop_name"],
+            geometry=d["geometry"],
+            area_ha=d["area_ha"],
+            notes=d.get("notes"),
+            created_at=d.get("created_at", ""),
+            updated_at=d.get("updated_at", ""),
+        )
+
+
 
 @dataclass
 class AggregationRow:
     """集計表の1行（1作物の地目別面積）"""
     crop_name: str
     field_area_ha: float  # 畑
-    converted_areas: Dict[Any, float]  # {year_or_'unknown': area_ha}
+    converted_areas: Dict[Any, float]  # {year_or_unknown: area_ha} 例: {2022: 1.0, 'unknown': 0.3}
     paddy_area_ha: float  # 水田
 
     @property

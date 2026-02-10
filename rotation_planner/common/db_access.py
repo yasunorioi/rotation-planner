@@ -19,10 +19,18 @@ DBアクセス層 - SQLiteデータベースへのCRUD操作モジュール
 import sqlite3
 import json
 import os
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from contextlib import contextmanager
+
+from rotation_planner.common.exceptions import (
+    DatabaseError, DuplicateKeyError, NotNullViolationError,
+    ForeignKeyViolationError, RecordNotFoundError
+)
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # 設定
@@ -159,22 +167,38 @@ class FieldRepository:
         Returns:
             作成されたほ場のID
         """
-        with get_db() as conn:
-            cursor = conn.execute("""
-                INSERT INTO fields (user_id, field_code, district, name, area_ha,
-                                   beet_forbidden, coordinates_json, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                user_id,
-                data['field_code'],
-                data.get('district'),
-                data.get('name'),
-                data['area_ha'],
-                data.get('beet_forbidden', 0),
-                data.get('coordinates_json'),
-                data.get('notes')
-            ))
-            return cursor.lastrowid
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO fields (user_id, field_code, district, name, area_ha,
+                                       beet_forbidden, coordinates_json, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id,
+                    data['field_code'],
+                    data.get('district'),
+                    data.get('name'),
+                    data['area_ha'],
+                    data.get('beet_forbidden', 0),
+                    data.get('coordinates_json'),
+                    data.get('notes')
+                ))
+                field_id = cursor.lastrowid
+                logger.info(f"作成成功: ほ場 field_code={data.get('field_code')} id={field_id}")
+                return field_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ほ場作成 - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def update_field(field_id: int, data: Dict[str, Any]) -> bool:
@@ -188,25 +212,42 @@ class FieldRepository:
         Returns:
             更新成功ならTrue
         """
-        with get_db() as conn:
-            # 更新対象カラムを動的に構築
-            updates = []
-            values = []
-            for key in ['field_code', 'district', 'name', 'area_ha',
-                       'beet_forbidden', 'coordinates_json', 'notes']:
-                if key in data:
-                    updates.append(f"{key} = ?")
-                    values.append(data[key])
+        try:
+            with get_db() as conn:
+                # 更新対象カラムを動的に構築
+                updates = []
+                values = []
+                for key in ['field_code', 'district', 'name', 'area_ha',
+                           'beet_forbidden', 'coordinates_json', 'notes']:
+                    if key in data:
+                        updates.append(f"{key} = ?")
+                        values.append(data[key])
 
-            if not updates:
-                return False
+                if not updates:
+                    return False
 
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            values.append(field_id)
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                values.append(field_id)
 
-            sql = f"UPDATE fields SET {', '.join(updates)} WHERE id = ?"
-            cursor = conn.execute(sql, values)
-            return cursor.rowcount > 0
+                sql = f"UPDATE fields SET {', '.join(updates)} WHERE id = ?"
+                cursor = conn.execute(sql, values)
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"更新成功: ほ場 id={field_id}")
+                return success
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ほ場更新 id={field_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete_field(field_id: int) -> bool:
@@ -219,9 +260,22 @@ class FieldRepository:
         Returns:
             削除成功ならTrue
         """
-        with get_db() as conn:
-            cursor = conn.execute("DELETE FROM fields WHERE id = ?", (field_id,))
-            return cursor.rowcount > 0
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("DELETE FROM fields WHERE id = ?", (field_id,))
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"削除成功: ほ場 id={field_id}")
+                return success
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在します。削除できません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ほ場削除 id={field_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def get_field_with_history(field_id: int) -> Optional[Dict[str, Any]]:
@@ -326,12 +380,19 @@ class CropHistoryRepository:
         Returns:
             削除成功ならTrue
         """
-        with get_db() as conn:
-            cursor = conn.execute("""
-                DELETE FROM crop_history
-                WHERE field_id = ? AND year = ?
-            """, (field_id, year))
-            return cursor.rowcount > 0
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    DELETE FROM crop_history
+                    WHERE field_id = ? AND year = ?
+                """, (field_id, year))
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"削除成功: 作付履歴 field_id={field_id} year={year}")
+                return success
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 作付履歴削除 field_id={field_id} year={year} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete_history_by_id(history_id: int) -> bool:
@@ -364,40 +425,63 @@ class CropHistoryRepository:
         Returns:
             更新・挿入された件数
         """
-        count = 0
-        with get_db() as conn:
-            for update in updates:
-                field_id = update.get('field_id')
-                year = update.get('year')
-                crop = update.get('crop', '').strip()
+        try:
+            count = 0
+            with get_db() as conn:
+                for update in updates:
+                    field_id = update.get('field_id')
+                    year = update.get('year')
+                    crop = update.get('crop', '').strip()
 
-                if not field_id or not year:
-                    continue
+                    if not field_id or not year:
+                        continue
 
-                if not crop:
-                    # 空の場合は削除
-                    conn.execute("""
-                        DELETE FROM crop_history
-                        WHERE field_id = ? AND year = ?
-                    """, (field_id, year))
-                else:
-                    # INSERT OR REPLACE で追加/更新
-                    conn.execute("""
-                        INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
-                        VALUES (?, ?, ?, 0)
-                    """, (field_id, year, crop))
-                count += 1
-        return count
+                    if not crop:
+                        # 空の場合は削除
+                        conn.execute("""
+                            DELETE FROM crop_history
+                            WHERE field_id = ? AND year = ?
+                        """, (field_id, year))
+                    else:
+                        # INSERT OR REPLACE で追加/更新
+                        conn.execute("""
+                            INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
+                            VALUES (?, ?, ?, 0)
+                        """, (field_id, year, crop))
+                    count += 1
+            logger.info(f"作成成功: 作付履歴一括更新 {count}件")
+            return count
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 作付履歴一括更新 - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def add_history(field_id: int, year: str, crop: str, is_inferred: bool = False) -> int:
         """作付履歴を追加"""
-        with get_db() as conn:
-            cursor = conn.execute("""
-                INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
-                VALUES (?, ?, ?, ?)
-            """, (field_id, year, crop, 1 if is_inferred else 0))
-            return cursor.lastrowid
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
+                    VALUES (?, ?, ?, ?)
+                """, (field_id, year, crop, 1 if is_inferred else 0))
+                history_id = cursor.lastrowid
+                logger.info(f"作成成功: 作付履歴 field_id={field_id} year={year} crop={crop}")
+                return history_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 作付履歴追加 field_id={field_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def bulk_add_history(field_id: int, history: Dict[str, str]) -> int:
@@ -493,33 +577,48 @@ class PlanRepository:
         Returns:
             作成された計画のID
         """
-        with get_db() as conn:
-            # 計画メタデータ
-            constraints_json = json.dumps(data.get('constraints', {}), ensure_ascii=False)
-            metadata_json = json.dumps(data.get('metadata', {}), ensure_ascii=False)
+        try:
+            with get_db() as conn:
+                # 計画メタデータ
+                constraints_json = json.dumps(data.get('constraints', {}), ensure_ascii=False)
+                metadata_json = json.dumps(data.get('metadata', {}), ensure_ascii=False)
 
-            cursor = conn.execute("""
-                INSERT INTO rotation_plans (user_id, name, start_year, end_year,
-                                           constraints_json, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                user_id,
-                data['name'],
-                data['start_year'],
-                data['end_year'],
-                constraints_json,
-                metadata_json
-            ))
-            plan_id = cursor.lastrowid
+                cursor = conn.execute("""
+                    INSERT INTO rotation_plans (user_id, name, start_year, end_year,
+                                               constraints_json, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id,
+                    data['name'],
+                    data['start_year'],
+                    data['end_year'],
+                    constraints_json,
+                    metadata_json
+                ))
+                plan_id = cursor.lastrowid
 
-            # 計画詳細
-            for detail in data.get('details', []):
-                conn.execute("""
-                    INSERT INTO plan_details (plan_id, field_id, year, crop)
-                    VALUES (?, ?, ?, ?)
-                """, (plan_id, detail['field_id'], detail['year'], detail['crop']))
+                # 計画詳細
+                for detail in data.get('details', []):
+                    conn.execute("""
+                        INSERT INTO plan_details (plan_id, field_id, year, crop)
+                        VALUES (?, ?, ?, ?)
+                    """, (plan_id, detail['field_id'], detail['year'], detail['crop']))
 
-            return plan_id
+                logger.info(f"作成成功: 輪作計画 name={data.get('name')} id={plan_id}")
+                return plan_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 輪作計画作成 - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def update_plan(plan_id: int, data: Dict[str, Any]) -> bool:
@@ -533,35 +632,50 @@ class PlanRepository:
         Returns:
             更新成功ならTrue
         """
-        with get_db() as conn:
-            # メタデータ更新
-            updates = []
-            values = []
-            for key in ['name', 'start_year', 'end_year']:
-                if key in data:
-                    updates.append(f"{key} = ?")
-                    values.append(data[key])
+        try:
+            with get_db() as conn:
+                # メタデータ更新
+                updates = []
+                values = []
+                for key in ['name', 'start_year', 'end_year']:
+                    if key in data:
+                        updates.append(f"{key} = ?")
+                        values.append(data[key])
 
-            if 'constraints' in data:
-                updates.append("constraints_json = ?")
-                values.append(json.dumps(data['constraints'], ensure_ascii=False))
+                if 'constraints' in data:
+                    updates.append("constraints_json = ?")
+                    values.append(json.dumps(data['constraints'], ensure_ascii=False))
 
-            if updates:
-                updates.append("updated_at = CURRENT_TIMESTAMP")
-                values.append(plan_id)
-                sql = f"UPDATE rotation_plans SET {', '.join(updates)} WHERE id = ?"
-                conn.execute(sql, values)
+                if updates:
+                    updates.append("updated_at = CURRENT_TIMESTAMP")
+                    values.append(plan_id)
+                    sql = f"UPDATE rotation_plans SET {', '.join(updates)} WHERE id = ?"
+                    conn.execute(sql, values)
 
-            # 詳細更新（全削除して再作成）
-            if 'details' in data:
-                conn.execute("DELETE FROM plan_details WHERE plan_id = ?", (plan_id,))
-                for detail in data['details']:
-                    conn.execute("""
-                        INSERT INTO plan_details (plan_id, field_id, year, crop)
-                        VALUES (?, ?, ?, ?)
-                    """, (plan_id, detail['field_id'], detail['year'], detail['crop']))
+                # 詳細更新（全削除して再作成）
+                if 'details' in data:
+                    conn.execute("DELETE FROM plan_details WHERE plan_id = ?", (plan_id,))
+                    for detail in data['details']:
+                        conn.execute("""
+                            INSERT INTO plan_details (plan_id, field_id, year, crop)
+                            VALUES (?, ?, ?, ?)
+                        """, (plan_id, detail['field_id'], detail['year'], detail['crop']))
 
-            return True
+                logger.info(f"更新成功: 輪作計画 id={plan_id}")
+                return True
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 輪作計画更新 id={plan_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete_plan(plan_id: int) -> bool:
@@ -574,9 +688,22 @@ class PlanRepository:
         Returns:
             削除成功ならTrue
         """
-        with get_db() as conn:
-            cursor = conn.execute("DELETE FROM rotation_plans WHERE id = ?", (plan_id,))
-            return cursor.rowcount > 0
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("DELETE FROM rotation_plans WHERE id = ?", (plan_id,))
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"削除成功: 輪作計画 id={plan_id}")
+                return success
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在します。削除できません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 輪作計画削除 id={plan_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
 
 # =============================================================================
@@ -726,7 +853,7 @@ class JAStaffRepository:
                 if r.get('order_data_json'):
                     try:
                         r['order_data'] = json.loads(r['order_data_json'])
-                    except json.JSONDecodeError:
+                    except (ValueError, json.JSONDecodeError):
                         r['order_data'] = {}
                 else:
                     r['order_data'] = {}
@@ -773,7 +900,7 @@ class JAStaffRepository:
 
                 try:
                     order_data = json.loads(order_data_json)
-                except json.JSONDecodeError:
+                except (ValueError, json.JSONDecodeError):
                     continue
 
                 summary = order_data.get('summary', [])
@@ -842,19 +969,35 @@ class UserRepository:
     @staticmethod
     def create_user(data: Dict[str, Any]) -> int:
         """ユーザーを作成"""
-        with get_db() as conn:
-            cursor = conn.execute("""
-                INSERT INTO users (username, password_hash, display_name, email, role, org_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                data['username'],
-                data['password_hash'],
-                data['display_name'],
-                data.get('email'),
-                data.get('role', 'farmer'),
-                data.get('org_id')
-            ))
-            return cursor.lastrowid
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO users (username, password_hash, display_name, email, role, org_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    data['username'],
+                    data['password_hash'],
+                    data['display_name'],
+                    data.get('email'),
+                    data.get('role', 'farmer'),
+                    data.get('org_id')
+                ))
+                user_id = cursor.lastrowid
+                logger.info(f"作成成功: ユーザー username={data.get('username')} id={user_id}")
+                return user_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ユーザー作成 - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def authenticate(username: str, password_hash: str) -> Optional[Dict[str, Any]]:
@@ -975,30 +1118,45 @@ class PesticideMasterRepository:
     @staticmethod
     def bulk_import(records: List[Dict[str, Any]], org_id: int = None) -> int:
         """CSVからの一括インポート"""
-        count = 0
-        with get_db() as conn:
-            for record in records:
-                record['org_id'] = org_id
-                conn.execute("""
-                    INSERT INTO pesticide_masters
-                    (org_id, crop, month, period, target, pesticide_name,
-                     dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    record.get('org_id'),
-                    record.get('crop'),
-                    record.get('month'),
-                    record.get('period'),
-                    record.get('target'),
-                    record.get('pesticide_name'),
-                    record.get('dilution_rate'),
-                    record.get('amount_per_10a'),
-                    record.get('unit'),
-                    record.get('days_before_harvest'),
-                    record.get('notes'),
-                ))
-                count += 1
-        return count
+        try:
+            count = 0
+            with get_db() as conn:
+                for record in records:
+                    record['org_id'] = org_id
+                    conn.execute("""
+                        INSERT INTO pesticide_masters
+                        (org_id, crop, month, period, target, pesticide_name,
+                         dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        record.get('org_id'),
+                        record.get('crop'),
+                        record.get('month'),
+                        record.get('period'),
+                        record.get('target'),
+                        record.get('pesticide_name'),
+                        record.get('dilution_rate'),
+                        record.get('amount_per_10a'),
+                        record.get('unit'),
+                        record.get('days_before_harvest'),
+                        record.get('notes'),
+                    ))
+                    count += 1
+            logger.info(f"作成成功: 防除マスタ一括インポート {count}件")
+            return count
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 防除マスタ一括インポート - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete_all(org_id: int = None) -> int:
@@ -1119,13 +1277,40 @@ class CropMasterRepository:
             return row_to_dict(cursor.fetchone())
 
     @staticmethod
+    def get_family_map() -> Dict[str, str]:
+        """作物名→科名マッピング取得。UserCropも解決。
+
+        Returns:
+            {作物名: 科名} の辞書。familyがNULLの作物は除外。
+        """
+        with get_db() as conn:
+            # crop_masterから直接取得
+            cursor = conn.execute("""
+                SELECT name, family FROM crop_master
+                WHERE family IS NOT NULL AND is_active = 1
+            """)
+            family_map = {row['name']: row['family'] for row in cursor.fetchall()}
+
+            # UserCropのcustom_nameも解決（親のfamilyを引き継ぐ）
+            cursor = conn.execute("""
+                SELECT uc.custom_name, cm.family
+                FROM user_crops uc
+                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
+                WHERE uc.custom_name IS NOT NULL AND cm.family IS NOT NULL
+            """)
+            for row in cursor.fetchall():
+                family_map[row['custom_name']] = row['family']
+
+            return family_map
+
+    @staticmethod
     def create(name: str, display_order: int = 0, family: str = None) -> int:
         """作物を追加"""
         with get_db() as conn:
             cursor = conn.execute("""
-                INSERT INTO crop_master (name, display_order, family)
+                INSERT INTO crop_master (name, family, display_order)
                 VALUES (?, ?, ?)
-            """, (name, display_order, family))
+            """, (name, family, display_order))
             conn.commit()
             return cursor.lastrowid
 
@@ -1161,33 +1346,6 @@ class CropMasterRepository:
             )
             conn.commit()
             return True
-
-    @staticmethod
-    def get_family_map() -> Dict[str, str]:
-        """作物名→科名マッピング取得。UserCropも解決。
-
-        Returns:
-            {作物名: 科名} の辞書。familyがNULLの作物は除外。
-        """
-        with get_db() as conn:
-            # crop_masterから直接取得
-            cursor = conn.execute("""
-                SELECT name, family FROM crop_master
-                WHERE family IS NOT NULL AND is_active = 1
-            """)
-            family_map = {row['name']: row['family'] for row in cursor.fetchall()}
-
-            # UserCropのcustom_nameも解決（親のfamilyを引き継ぐ）
-            cursor = conn.execute("""
-                SELECT uc.custom_name, cm.family
-                FROM user_crops uc
-                INNER JOIN crop_master cm ON cm.id = uc.parent_crop_id
-                WHERE uc.custom_name IS NOT NULL AND cm.family IS NOT NULL
-            """)
-            for row in cursor.fetchall():
-                family_map[row['custom_name']] = row['family']
-
-            return family_map
 
 
 # =============================================================================
@@ -1250,22 +1408,33 @@ class UserCropRepository:
         ユーザーの作物選択を設定（マスタからの選択、カスタム名なし）
         既存のカスタム名なしエントリのみ削除して再登録
         """
-        with get_db() as conn:
-            # カスタム名なしのエントリを削除
-            conn.execute("""
-                DELETE FROM user_crops
-                WHERE user_id = ? AND custom_name IS NULL
-            """, (user_id,))
-
-            # 新規登録
-            for crop_id in crop_ids:
+        try:
+            with get_db() as conn:
+                # カスタム名なしのエントリを削除
                 conn.execute("""
-                    INSERT OR IGNORE INTO user_crops (user_id, parent_crop_id, custom_name)
-                    VALUES (?, ?, NULL)
-                """, (user_id, crop_id))
+                    DELETE FROM user_crops
+                    WHERE user_id = ? AND custom_name IS NULL
+                """, (user_id,))
 
-            conn.commit()
-            return True
+                # 新規登録
+                for crop_id in crop_ids:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO user_crops (user_id, parent_crop_id, custom_name)
+                        VALUES (?, ?, NULL)
+                    """, (user_id, crop_id))
+
+                conn.commit()
+                logger.info(f"作成成功: ユーザー作物選択 user_id={user_id} {len(crop_ids)}件")
+                return True
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ユーザー作物選択設定 user_id={user_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def add_user_crop(user_id: int, parent_crop_id: int, custom_name: str = None) -> int:
@@ -1280,13 +1449,27 @@ class UserCropRepository:
         Returns:
             新規作成されたuser_crops.id
         """
-        with get_db() as conn:
-            cursor = conn.execute("""
-                INSERT INTO user_crops (user_id, parent_crop_id, custom_name)
-                VALUES (?, ?, ?)
-            """, (user_id, parent_crop_id, custom_name))
-            conn.commit()
-            return cursor.lastrowid
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO user_crops (user_id, parent_crop_id, custom_name)
+                    VALUES (?, ?, ?)
+                """, (user_id, parent_crop_id, custom_name))
+                conn.commit()
+                user_crop_id = cursor.lastrowid
+                logger.info(f"作成成功: ユーザー作物追加 user_id={user_id} crop_id={parent_crop_id} id={user_crop_id}")
+                return user_crop_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ユーザー作物追加 user_id={user_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def remove_user_crop(user_id: int, user_crop_id: int) -> bool:
@@ -1708,20 +1891,31 @@ class UserConstraintsRepository:
         Returns:
             成功時True
         """
-        constraints_json = json.dumps(constraints, ensure_ascii=False)
-        with get_db() as conn:
-            conn.execute("""
-                INSERT INTO user_constraints (user_id, constraints_json, forbidden_transitions,
-                                              preferred_transitions, main_crops, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    constraints_json = excluded.constraints_json,
-                    forbidden_transitions = excluded.forbidden_transitions,
-                    preferred_transitions = excluded.preferred_transitions,
-                    main_crops = excluded.main_crops,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (user_id, constraints_json, forbidden_transitions, preferred_transitions, main_crops))
-        return True
+        try:
+            constraints_json = json.dumps(constraints, ensure_ascii=False)
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT INTO user_constraints (user_id, constraints_json, forbidden_transitions,
+                                                  preferred_transitions, main_crops, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        constraints_json = excluded.constraints_json,
+                        forbidden_transitions = excluded.forbidden_transitions,
+                        preferred_transitions = excluded.preferred_transitions,
+                        main_crops = excluded.main_crops,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (user_id, constraints_json, forbidden_transitions, preferred_transitions, main_crops))
+            logger.info(f"作成成功: ユーザー制約設定 user_id={user_id}")
+            return True
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: ユーザー制約設定保存 user_id={user_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete_constraints(user_id: int) -> bool:
@@ -2379,49 +2573,105 @@ class PaddyPolygonRepository:
         source: str = 'manual',
         notes: Optional[str] = None
     ) -> int:
-        """水田ポリゴンを作成"""
-        with get_db() as conn:
-            cursor = conn.execute("""
-                INSERT INTO paddy_polygons (
-                    field_id, geometry, area_ha, is_converted,
-                    conversion_start_year, source, notes
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                field_id,
-                geometry,
-                area_ha,
-                1 if is_converted else 0,
-                conversion_start_year,
-                source,
-                notes
-            ))
-            conn.commit()
-            return cursor.lastrowid
+        """
+        水田ポリゴンを作成
+
+        Args:
+            field_id: ほ場ID
+            geometry: ジオメトリ（GeoJSON等）
+            area_ha: 面積（ha）
+            is_converted: 転作フラグ
+            conversion_start_year: 転作開始年度
+            source: データソース（'manual', 'maff', 'kml'）
+            notes: 備考
+
+        Returns:
+            作成されたポリゴンのID
+        """
+        try:
+            with get_db() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO paddy_polygons (
+                        field_id, geometry, area_ha, is_converted,
+                        conversion_start_year, source, notes
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    field_id,
+                    geometry,
+                    area_ha,
+                    1 if is_converted else 0,
+                    conversion_start_year,
+                    source,
+                    notes
+                ))
+                polygon_id = cursor.lastrowid
+                logger.info(f"水田ポリゴン作成成功: id={polygon_id}, field_id={field_id}")
+                return polygon_id
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            logger.error(f"水田ポリゴン作成失敗: {e}")
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"水田ポリゴン作成失敗: {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def get_by_id(polygon_id: int) -> Optional[Dict[str, Any]]:
-        """IDで水田ポリゴンを取得"""
+        """
+        IDで水田ポリゴンを取得
+
+        Args:
+            polygon_id: ポリゴンID
+
+        Returns:
+            ポリゴンデータ（存在しない場合はNone）
+        """
         with get_db() as conn:
             cursor = conn.execute(
                 "SELECT * FROM paddy_polygons WHERE id = ?",
                 (polygon_id,)
             )
-            return row_to_dict(cursor.fetchone())
+            row = cursor.fetchone()
+            return row_to_dict(row)
 
     @staticmethod
     def get_by_field(field_id: int) -> List[Dict[str, Any]]:
-        """ほ場IDで水田ポリゴン一覧を取得"""
+        """
+        ほ場IDで水田ポリゴン一覧を取得
+
+        Args:
+            field_id: ほ場ID
+
+        Returns:
+            ポリゴンデータのリスト
+        """
         with get_db() as conn:
             cursor = conn.execute(
                 "SELECT * FROM paddy_polygons WHERE field_id = ? ORDER BY id",
                 (field_id,)
             )
-            return rows_to_list(cursor.fetchall())
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
 
     @staticmethod
     def get_all_for_user(user_id: int) -> List[Dict[str, Any]]:
-        """ユーザーの全水田ポリゴンを取得"""
+        """
+        ユーザーの全水田ポリゴンを取得
+
+        Args:
+            user_id: ユーザーID
+
+        Returns:
+            ポリゴンデータのリスト
+        """
         with get_db() as conn:
             cursor = conn.execute("""
                 SELECT pp.*
@@ -2430,45 +2680,87 @@ class PaddyPolygonRepository:
                 WHERE f.user_id = ?
                 ORDER BY pp.id
             """, (user_id,))
-            return rows_to_list(cursor.fetchall())
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
 
     @staticmethod
     def update(polygon_id: int, **kwargs) -> bool:
-        """水田ポリゴンを更新"""
-        with get_db() as conn:
-            updates = []
-            values = []
-            for key in ['geometry', 'area_ha', 'is_converted', 'conversion_start_year', 'source', 'notes']:
-                if key in kwargs:
-                    updates.append(f"{key} = ?")
-                    if key == 'is_converted':
-                        values.append(1 if kwargs[key] else 0)
-                    else:
-                        values.append(kwargs[key])
+        """
+        水田ポリゴンを更新
 
-            if not updates:
-                return False
+        Args:
+            polygon_id: ポリゴンID
+            **kwargs: 更新データ（geometry, area_ha, is_converted, conversion_start_year, source, notes）
 
-            updates.append("updated_at = datetime('now', 'localtime')")
-            values.append(polygon_id)
+        Returns:
+            更新成功ならTrue
+        """
+        try:
+            with get_db() as conn:
+                # 更新対象カラムを動的に構築
+                updates = []
+                values = []
+                for key in ['geometry', 'area_ha', 'is_converted', 'conversion_start_year', 'source', 'notes']:
+                    if key in kwargs:
+                        updates.append(f"{key} = ?")
+                        # is_convertedはbool→intに変換
+                        if key == 'is_converted':
+                            values.append(1 if kwargs[key] else 0)
+                        else:
+                            values.append(kwargs[key])
 
-            cursor = conn.execute(
-                f"UPDATE paddy_polygons SET {', '.join(updates)} WHERE id = ?",
-                values
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+                if not updates:
+                    return False
+
+                updates.append("updated_at = datetime('now', 'localtime')")
+                values.append(polygon_id)
+
+                sql = f"UPDATE paddy_polygons SET {', '.join(updates)} WHERE id = ?"
+                cursor = conn.execute(sql, values)
+                success = cursor.rowcount > 0
+
+                if success:
+                    logger.info(f"水田ポリゴン更新成功: id={polygon_id}")
+                return success
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            logger.error(f"水田ポリゴン更新失敗: {e}")
+            if "unique" in error_msg:
+                raise DuplicateKeyError(f"重複データです: {e}")
+            elif "not null" in error_msg:
+                raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"水田ポリゴン更新失敗: {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete(polygon_id: int) -> bool:
-        """水田ポリゴンを削除"""
-        with get_db() as conn:
-            cursor = conn.execute(
-                "DELETE FROM paddy_polygons WHERE id = ?",
-                (polygon_id,)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+        """
+        水田ポリゴンを削除
+
+        Args:
+            polygon_id: ポリゴンID
+
+        Returns:
+            削除成功ならTrue
+        """
+        try:
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM paddy_polygons WHERE id = ?",
+                    (polygon_id,)
+                )
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"水田ポリゴン削除成功: id={polygon_id}")
+                return success
+        except sqlite3.Error as e:
+            logger.error(f"水田ポリゴン削除失敗: {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def get_stats(user_id: int) -> Dict[str, Any]:
@@ -2493,9 +2785,53 @@ class PaddyPolygonRepository:
                 'paddy_count': 0, 'converted_count': 0
             }
 
+    @staticmethod
+    def get_converted(user_id: int) -> List[Dict[str, Any]]:
+        """
+        ユーザーの転作済み水田ポリゴンを取得
+
+        Args:
+            user_id: ユーザーID
+
+        Returns:
+            転作済みポリゴンデータのリスト
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT pp.*
+                FROM paddy_polygons pp
+                JOIN fields f ON pp.field_id = f.id
+                WHERE f.user_id = ? AND pp.is_converted = 1
+                ORDER BY pp.id
+            """, (user_id,))
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
+
+    @staticmethod
+    def get_paddy(user_id: int) -> List[Dict[str, Any]]:
+        """
+        ユーザーの水田（転作していない）ポリゴンを取得
+
+        Args:
+            user_id: ユーザーID
+
+        Returns:
+            水田ポリゴンデータのリスト
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT pp.*
+                FROM paddy_polygons pp
+                JOIN fields f ON pp.field_id = f.id
+                WHERE f.user_id = ? AND pp.is_converted = 0
+                ORDER BY pp.id
+            """, (user_id,))
+            rows = cursor.fetchall()
+            return rows_to_list(rows)
+
 
 # =============================================================================
-# 作付けポリゴン（Crop Polygons）リポジトリ
+# 作物ポリゴン（Crop Polygons）リポジトリ
 # =============================================================================
 
 def ensure_crop_polygons_table():
@@ -2527,7 +2863,7 @@ def ensure_crop_polygons_table():
 
 
 class CropPolygonRepository:
-    """作付けポリゴンデータのCRUD操作"""
+    """作物ポリゴンデータのCRUD操作"""
 
     @staticmethod
     def create(
@@ -2536,9 +2872,22 @@ class CropPolygonRepository:
         crop_name: str,
         geometry: str,
         area_ha: float,
-        notes: str = None
+        notes: Optional[str] = None
     ) -> int:
-        """作付けポリゴンを作成し、作成されたIDを返す"""
+        """
+        作物ポリゴンを作成
+
+        Args:
+            field_id: ほ場ID
+            year: 年度
+            crop_name: 作物名
+            geometry: ジオメトリ（GeoJSON等）
+            area_ha: 面積（ha）
+            notes: 備考
+
+        Returns:
+            作成されたポリゴンのID
+        """
         try:
             with get_db() as conn:
                 cursor = conn.execute("""
@@ -2546,11 +2895,20 @@ class CropPolygonRepository:
                         field_id, year, crop_name, geometry, area_ha, notes
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (field_id, year, crop_name, geometry, area_ha, notes))
+                """, (
+                    field_id,
+                    year,
+                    crop_name,
+                    geometry,
+                    area_ha,
+                    notes
+                ))
                 polygon_id = cursor.lastrowid
+                logger.info(f"作物ポリゴン作成成功: id={polygon_id}, field_id={field_id}, year={year}, crop={crop_name}")
                 return polygon_id
         except sqlite3.IntegrityError as e:
             error_msg = str(e).lower()
+            logger.error(f"作物ポリゴン作成失敗: {e}")
             if "unique" in error_msg:
                 raise DuplicateKeyError(f"重複データです: {e}")
             elif "not null" in error_msg:
@@ -2560,11 +2918,20 @@ class CropPolygonRepository:
             else:
                 raise DatabaseError(f"データベースエラー: {e}")
         except sqlite3.Error as e:
+            logger.error(f"作物ポリゴン作成失敗: {e}")
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def get_by_id(polygon_id: int) -> Optional[Dict[str, Any]]:
-        """IDで作付けポリゴンを取得"""
+        """
+        IDで作物ポリゴンを取得
+
+        Args:
+            polygon_id: ポリゴンID
+
+        Returns:
+            ポリゴンデータ（存在しない場合はNone）
+        """
         with get_db() as conn:
             cursor = conn.execute(
                 "SELECT * FROM crop_polygons WHERE id = ?",
@@ -2575,7 +2942,16 @@ class CropPolygonRepository:
 
     @staticmethod
     def get_by_field_year(field_id: int, year: int) -> List[Dict[str, Any]]:
-        """ほ場IDと年度で作付けポリゴン一覧を取得"""
+        """
+        ほ場IDと年度で作物ポリゴン一覧を取得
+
+        Args:
+            field_id: ほ場ID
+            year: 年度
+
+        Returns:
+            ポリゴンデータのリスト
+        """
         with get_db() as conn:
             cursor = conn.execute(
                 "SELECT * FROM crop_polygons WHERE field_id = ? AND year = ? ORDER BY id",
@@ -2586,7 +2962,16 @@ class CropPolygonRepository:
 
     @staticmethod
     def get_all_for_user_year(user_id: int, year: int) -> List[Dict[str, Any]]:
-        """ユーザーの特定年度の全作付けポリゴンを取得"""
+        """
+        ユーザーの特定年度の全作物ポリゴンを取得
+
+        Args:
+            user_id: ユーザーID
+            year: 年度
+
+        Returns:
+            ポリゴンデータのリスト
+        """
         with get_db() as conn:
             cursor = conn.execute("""
                 SELECT cp.*
@@ -2600,9 +2985,19 @@ class CropPolygonRepository:
 
     @staticmethod
     def update(polygon_id: int, **kwargs) -> bool:
-        """作付けポリゴンを更新。更新成功ならTrue"""
+        """
+        作物ポリゴンを更新
+
+        Args:
+            polygon_id: ポリゴンID
+            **kwargs: 更新データ（year, crop_name, geometry, area_ha, notes）
+
+        Returns:
+            更新成功ならTrue
+        """
         try:
             with get_db() as conn:
+                # 更新対象カラムを動的に構築
                 updates = []
                 values = []
                 for key in ['year', 'crop_name', 'geometry', 'area_ha', 'notes']:
@@ -2619,9 +3014,13 @@ class CropPolygonRepository:
                 sql = f"UPDATE crop_polygons SET {', '.join(updates)} WHERE id = ?"
                 cursor = conn.execute(sql, values)
                 success = cursor.rowcount > 0
+
+                if success:
+                    logger.info(f"作物ポリゴン更新成功: id={polygon_id}")
                 return success
         except sqlite3.IntegrityError as e:
             error_msg = str(e).lower()
+            logger.error(f"作物ポリゴン更新失敗: {e}")
             if "unique" in error_msg:
                 raise DuplicateKeyError(f"重複データです: {e}")
             elif "not null" in error_msg:
@@ -2631,11 +3030,20 @@ class CropPolygonRepository:
             else:
                 raise DatabaseError(f"データベースエラー: {e}")
         except sqlite3.Error as e:
+            logger.error(f"作物ポリゴン更新失敗: {e}")
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def delete(polygon_id: int) -> bool:
-        """作付けポリゴンを削除。削除成功ならTrue"""
+        """
+        作物ポリゴンを削除
+
+        Args:
+            polygon_id: ポリゴンID
+
+        Returns:
+            削除成功ならTrue
+        """
         try:
             with get_db() as conn:
                 cursor = conn.execute(
@@ -2643,13 +3051,26 @@ class CropPolygonRepository:
                     (polygon_id,)
                 )
                 success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"作物ポリゴン削除成功: id={polygon_id}")
                 return success
         except sqlite3.Error as e:
+            logger.error(f"作物ポリゴン削除失敗: {e}")
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
     def copy_from_previous_year(user_id: int, from_year: int, to_year: int) -> int:
-        """前年度の作付けポリゴンを次年度にコピー。コピー件数を返す"""
+        """
+        前年度の作物ポリゴンを次年度にコピー
+
+        Args:
+            user_id: ユーザーID
+            from_year: コピー元年度
+            to_year: コピー先年度
+
+        Returns:
+            コピーした件数
+        """
         try:
             with get_db() as conn:
                 cursor = conn.execute("""
@@ -2663,16 +3084,21 @@ class CropPolygonRepository:
                     WHERE f.user_id = ? AND cp.year = ?
                 """, (to_year, user_id, from_year))
                 count = cursor.rowcount
+                logger.info(f"作物ポリゴンコピー成功: {from_year}→{to_year}, {count}件")
                 return count
         except sqlite3.IntegrityError as e:
             error_msg = str(e).lower()
+            logger.error(f"作物ポリゴンコピー失敗: {e}")
             if "unique" in error_msg:
                 raise DuplicateKeyError(f"重複データです: {e}")
             elif "not null" in error_msg:
                 raise NotNullViolationError(f"必須項目が未入力です: {e}")
+            elif "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
             else:
                 raise DatabaseError(f"データベースエラー: {e}")
         except sqlite3.Error as e:
+            logger.error(f"作物ポリゴンコピー失敗: {e}")
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
 

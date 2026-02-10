@@ -16,6 +16,7 @@ import json
 from typing import Union
 from shapely.geometry import shape, mapping, Polygon, MultiPolygon
 from shapely.ops import unary_union
+from shapely import STRtree
 from pyproj import Geod
 
 from rotation_planner.common.models import LandCategory
@@ -204,12 +205,18 @@ def build_adjacency_graph(
 
     adjacency: dict[str, list[str]] = {code: [] for code, _ in valid_fields}
 
-    for i in range(len(valid_fields)):
-        code_a, poly_a = valid_fields[i]
-        buffered_a = poly_a.buffer(buf_deg)
-        for j in range(i + 1, len(valid_fields)):
-            code_b, poly_b = valid_fields[j]
-            if buffered_a.intersects(poly_b):
+    if not valid_fields:
+        return adjacency
+
+    polys = [poly for _, poly in valid_fields]
+    tree = STRtree(polys)
+
+    for i, (code_a, poly_a) in enumerate(valid_fields):
+        buffered = poly_a.buffer(buf_deg)
+        hit_indices = tree.query(buffered, predicate='intersects')
+        for j in hit_indices:
+            if j > i:
+                code_b = valid_fields[j][0]
                 adjacency[code_a].append(code_b)
                 adjacency[code_b].append(code_a)
 
@@ -338,5 +345,6 @@ __all__ = [
     'get_adjacent_field_pairs',
     'determine_land_category',
     'split_crop_by_land_category',
+    '_meters_to_degrees',
     'LandCategory',
 ]

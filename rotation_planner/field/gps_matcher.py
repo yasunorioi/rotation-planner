@@ -19,11 +19,13 @@ from typing import List, Dict, Any, Optional, Tuple
 try:
     from shapely.geometry import Point, Polygon
     from shapely.ops import nearest_points
+    from shapely import STRtree
     SHAPELY_AVAILABLE = True
 except ImportError:
     SHAPELY_AVAILABLE = False
 
 from pyproj import Geod
+from rotation_planner.field.spatial import _meters_to_degrees
 
 
 # =============================================================================
@@ -169,14 +171,25 @@ def find_field_by_gps(
 
     point = Point(gps_lon, gps_lat)  # Shapelyは (x, y) = (lng, lat)
 
+    # ほ場とポリゴンのペアを構築
+    valid_entries = []
+    polygons = []
     for field in fields:
         coords = _parse_coordinates(field.get("coordinates_json"))
         if not coords:
             continue
-
         polygon = _coords_to_polygon(coords)
-        if polygon and polygon.contains(point):
-            return field
+        if polygon:
+            valid_entries.append(field)
+            polygons.append(polygon)
+
+    if not polygons:
+        return None
+
+    tree = STRtree(polygons)
+    hits = tree.query(point, predicate='covered_by')
+    if len(hits) > 0:
+        return valid_entries[hits[0]]
 
     return None
 
@@ -209,54 +222,87 @@ def get_field_candidates(
     if not fields:
         return []
 
-    candidates = []
     point = Point(gps_lon, gps_lat) if SHAPELY_AVAILABLE else None
 
-    for field in fields:
-        coords = _parse_coordinates(field.get("coordinates_json"))
-        if not coords:
-            continue
-
-        # ポリゴン内判定
-        is_inside = False
-        distance_m = float('inf')
-
-        if SHAPELY_AVAILABLE and point:
+    # Shapely利用可能時: STRtreeで空間絞り込み
+    if SHAPELY_AVAILABLE and point:
+        # 有効なほ場・ポリゴン・座標を構築
+        valid_entries = []
+        polygons = []
+        coords_list = []
+        for field in fields:
+            coords = _parse_coordinates(field.get("coordinates_json"))
+            if not coords:
+                continue
             polygon = _coords_to_polygon(coords)
             if polygon:
-                is_inside = polygon.contains(point)
+                valid_entries.append(field)
+                polygons.append(polygon)
+                coords_list.append(coords)
 
-                if is_inside:
-                    distance_m = 0.0
-                else:
-                    # ポリゴンまでの最短距離を計算
-                    try:
-                        nearest_pt = nearest_points(point, polygon)[1]
-                        distance_m = _calculate_distance(
-                            gps_lat, gps_lon,
-                            nearest_pt.y, nearest_pt.x
-                        )
-                    except Exception:
-                        # フォールバック: 重心までの距離
-                        centroid = _get_polygon_centroid(coords)
-                        distance_m = _calculate_distance(
-                            gps_lat, gps_lon,
-                            centroid[0], centroid[1]
-                        )
-        else:
-            # Shapely未使用時: 重心までの距離で代用
+        if not polygons:
+            return []
+
+        tree = STRtree(polygons)
+
+        # contains判定（ほ場内にいるケース）
+        inside_hits = set(tree.query(point, predicate='covered_by'))
+
+        # バッファ範囲内の候補に絞ってから距離計算
+        buf_deg = _meters_to_degrees(max_distance)
+        search_area = point.buffer(buf_deg)
+        nearby_hits = tree.query(search_area, predicate='intersects')
+
+        # inside_hitsとnearby_hitsを合わせた候補のみ処理
+        candidate_indices = set(nearby_hits) | inside_hits
+
+        candidates = []
+        for idx in candidate_indices:
+            field = valid_entries[idx]
+            polygon = polygons[idx]
+            coords = coords_list[idx]
+            is_inside = idx in inside_hits
+
+            if is_inside:
+                distance_m = 0.0
+            else:
+                try:
+                    nearest_pt = nearest_points(point, polygon)[1]
+                    distance_m = _calculate_distance(
+                        gps_lat, gps_lon,
+                        nearest_pt.y, nearest_pt.x
+                    )
+                except Exception:
+                    centroid = _get_polygon_centroid(coords)
+                    distance_m = _calculate_distance(
+                        gps_lat, gps_lon,
+                        centroid[0], centroid[1]
+                    )
+
+            if distance_m <= max_distance or is_inside:
+                candidate = field.copy()
+                candidate["distance_m"] = round(distance_m, 1)
+                candidate["is_inside"] = is_inside
+                candidates.append(candidate)
+    else:
+        # Shapely未使用時: 重心までの距離で代用（フォールバック）
+        candidates = []
+        for field in fields:
+            coords = _parse_coordinates(field.get("coordinates_json"))
+            if not coords:
+                continue
+
             centroid = _get_polygon_centroid(coords)
             distance_m = _calculate_distance(
                 gps_lat, gps_lon,
                 centroid[0], centroid[1]
             )
 
-        # 候補に追加
-        if distance_m <= max_distance or is_inside:
-            candidate = field.copy()
-            candidate["distance_m"] = round(distance_m, 1)
-            candidate["is_inside"] = is_inside
-            candidates.append(candidate)
+            if distance_m <= max_distance:
+                candidate = field.copy()
+                candidate["distance_m"] = round(distance_m, 1)
+                candidate["is_inside"] = False
+                candidates.append(candidate)
 
     # 距離順でソート（内部にあるものを優先）
     candidates.sort(key=lambda c: (not c["is_inside"], c["distance_m"]))

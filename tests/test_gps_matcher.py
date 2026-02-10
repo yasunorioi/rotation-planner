@@ -4,6 +4,8 @@ GPS→ほ場マッチング機能のテスト
 
 import pytest
 import json
+import time
+import random
 from rotation_planner.field.gps_matcher import (
     find_field_by_gps,
     get_field_candidates,
@@ -229,3 +231,64 @@ class TestShapelyFallback:
 
         # 何らかの結果が返る
         assert isinstance(candidates, list)
+
+
+# ============================================================
+# パフォーマンステスト（STRtree）
+# ============================================================
+
+def _generate_scattered_fields(count: int) -> list:
+    """テスト用: count個のほ場をランダムに生成（北海道範囲）"""
+    rng = random.Random(42)  # 再現性のためseed固定
+    fields = []
+    for i in range(count):
+        lat = rng.uniform(42.5, 43.5)
+        lon = rng.uniform(141.0, 145.0)
+        step = 0.001
+        coords = [
+            [lat, lon],
+            [lat, lon + step],
+            [lat + step, lon + step],
+            [lat + step, lon],
+        ]
+        fields.append({
+            'id': i + 1,
+            'field_code': f'F{i:04d}',
+            'name': f'テスト{i}号',
+            'area_ha': 0.1,
+            'coordinates_json': json.dumps(coords),
+        })
+    return fields
+
+
+class TestGpsMatcherPerformance:
+    """GPSマッチングのパフォーマンステスト"""
+
+    @pytest.mark.slow
+    @pytest.mark.skipif(not SHAPELY_AVAILABLE, reason="Shapely not available")
+    def test_gps_candidates_performance_500_fields(self):
+        """500ほ場のGPSマッチングが0.5秒以内に完了"""
+        fields = _generate_scattered_fields(500)
+        # 検索対象: フィールド群の中央付近
+        target_lat = 43.0
+        target_lon = 143.0
+        t0 = time.time()
+        candidates = get_field_candidates(target_lat, target_lon, fields, max_distance=50000)
+        elapsed = time.time() - t0
+        assert elapsed < 0.5
+        assert isinstance(candidates, list)
+
+    @pytest.mark.slow
+    @pytest.mark.skipif(not SHAPELY_AVAILABLE, reason="Shapely not available")
+    def test_find_field_performance_1000_fields(self):
+        """1000ほ場のfind_field_by_gpsが0.2秒以内に完了"""
+        fields = _generate_scattered_fields(1000)
+        # 最初のほ場の内部を狙う
+        first_coords = json.loads(fields[0]['coordinates_json'])
+        target_lat = first_coords[0][0] + 0.0005
+        target_lon = first_coords[0][1] + 0.0005
+        t0 = time.time()
+        result = find_field_by_gps(target_lat, target_lon, fields)
+        elapsed = time.time() - t0
+        assert elapsed < 0.2
+        assert result is not None

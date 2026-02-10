@@ -3,9 +3,10 @@
 
 テスト設計: cmd_072 タスクYAML
 テストケース: SC-01～SC-04, SA-01～SA-03, SL-01～SL-08
-合計: 15テスト
+合計: 15テスト + パフォーマンステスト
 """
 import json
+import time
 
 import pytest
 from shapely.geometry import Polygon, MultiPolygon
@@ -19,6 +20,7 @@ from rotation_planner.field.spatial import (
     determine_land_category,
     split_crop_by_land_category,
     merge_paddy_polygons,
+    build_adjacency_graph,
     LandCategory,
 )
 
@@ -279,3 +281,53 @@ class TestDetermineLandCategory:
         geom2 = geojson_to_shapely(geojson2)
         total_area = geom1.area + geom2.area
         assert abs(merged_geom.area - total_area) < total_area * 0.01
+
+
+# ============================================================
+# パフォーマンステスト（STRtree）
+# ============================================================
+
+def _generate_grid_fields(rows: int, cols: int) -> list[dict]:
+    """テスト用: rows×colsのグリッド状ほ場を生成"""
+    fields = []
+    base_lat, base_lon = 42.92, 143.20
+    step = 0.001  # 約100m間隔
+    for r in range(rows):
+        for c in range(cols):
+            lat0 = base_lat + r * step
+            lon0 = base_lon + c * step
+            coords = [
+                [lat0, lon0],
+                [lat0, lon0 + step * 0.9],
+                [lat0 + step * 0.9, lon0 + step * 0.9],
+                [lat0 + step * 0.9, lon0],
+            ]
+            fields.append({
+                'field_code': f'F{r:03d}{c:03d}',
+                'coordinates_json': json.dumps(coords),
+            })
+    return fields
+
+
+class TestAdjacencyPerformance:
+    """隣接判定のパフォーマンステスト"""
+
+    @pytest.mark.slow
+    def test_adjacency_performance_100_fields(self):
+        """100ほ場の隣接判定が1秒以内に完了"""
+        fields = _generate_grid_fields(10, 10)
+        t0 = time.time()
+        graph = build_adjacency_graph(fields)
+        elapsed = time.time() - t0
+        assert elapsed < 1.0
+        assert len(graph) == 100
+
+    @pytest.mark.slow
+    def test_adjacency_performance_1000_fields(self):
+        """1000ほ場の隣接判定が5秒以内に完了"""
+        fields = _generate_grid_fields(25, 40)
+        t0 = time.time()
+        graph = build_adjacency_graph(fields)
+        elapsed = time.time() - t0
+        assert elapsed < 5.0
+        assert len(graph) == 1000

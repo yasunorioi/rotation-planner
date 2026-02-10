@@ -680,6 +680,10 @@ export default function FieldRegister() {
               selectedFieldId={selectedField?.id}
               fudePolygons={fudePolygons}
               showFudePolygons={showFudePolygons}
+              previewPolygons={kmlPreviewData.map((preview) => {
+                const coords = kmlCoordsData.find((c) => c.field_id === preview.field_id);
+                return coords ? { ...preview, coordinates: coords.coordinates } : null;
+              }).filter(Boolean)}
             />
           </div>
 

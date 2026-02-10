@@ -33,12 +33,14 @@ export default function FieldMap({
   selectedFieldId = null,
   fudePolygons = [],
   showFudePolygons = false,
+  previewPolygons = [],
 }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const drawnItemsRef = useRef(null);
   const existingFieldsRef = useRef(null);
   const fudePolygonsRef = useRef(null);
+  const previewPolygonsRef = useRef(null);
   const [areaInfo, setAreaInfo] = useState(null);
 
   // 地図初期化
@@ -102,6 +104,11 @@ export default function FieldMap({
       const fudePolygonsLayer = new L.FeatureGroup();
       map.addLayer(fudePolygonsLayer);
       fudePolygonsRef.current = fudePolygonsLayer;
+
+      // KMLプレビューレイヤー
+      const previewPolygonsLayer = new L.FeatureGroup();
+      map.addLayer(previewPolygonsLayer);
+      previewPolygonsRef.current = previewPolygonsLayer;
 
       // 描画コントロール
       const drawControl = new L.Control.Draw({
@@ -277,6 +284,45 @@ export default function FieldMap({
       fudePolygonsRef.current.addLayer(polygon);
     });
   }, [fudePolygons, showFudePolygons, onFudePolygonClick]);
+
+  // KMLプレビューポリゴンの表示
+  useEffect(() => {
+    if (!previewPolygonsRef.current) return;
+
+    previewPolygonsRef.current.clearLayers();
+
+    if (!previewPolygons.length) return;
+
+    previewPolygons.forEach((item) => {
+      const coords = item.coordinates;
+      if (!coords || coords.length < 3) return;
+
+      const polygon = L.polygon(coords, {
+        color: '#1976d2',
+        fillColor: '#42a5f5',
+        fillOpacity: 0.25,
+        weight: 2,
+        dashArray: '5, 5',
+      });
+
+      polygon.bindPopup(`
+        <div>
+          <b>${item.field_name || item.field_id || 'プレビュー'}</b><br>
+          ${item.area_ha ? item.area_ha.toFixed(2) + ' ha' : ''}
+        </div>
+      `);
+
+      previewPolygonsRef.current.addLayer(polygon);
+    });
+
+    // プレビューポリゴンが存在する場合、地図をフィット
+    if (mapInstanceRef.current && previewPolygonsRef.current.getLayers().length > 0) {
+      const bounds = previewPolygonsRef.current.getBounds();
+      if (bounds.isValid()) {
+        mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
+      }
+    }
+  }, [previewPolygons]);
 
   // 住所検索で地図移動
   const moveToLocation = useCallback((lat, lng, zoom = 16) => {

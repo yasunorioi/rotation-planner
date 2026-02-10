@@ -38,10 +38,10 @@ class TestCropFamilyInitialData:
         assert crop_map['てんさい'] == 'アカザ科'
         assert crop_map['ばれいしょ'] == 'ナス科'
         assert crop_map['あずき'] == 'マメ科'
-        assert crop_map['たまねぎ'] == 'ユリ科'
         assert crop_map['にんじん'] == 'セリ科'
         assert crop_map['かぼちゃ'] == 'ウリ科'
-        assert crop_map['スイートコーン'] == 'イネ科'
+        assert crop_map['キャベツ'] == 'アブラナ科'
+        assert crop_map['だいこん'] == 'アブラナ科'
 
 
 class TestGetFamilyMap:

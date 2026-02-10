@@ -286,25 +286,17 @@ CREATE TABLE IF NOT EXISTS crop_master (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 初期作物データ（FAMIC表記 + Gradio版表記 + ensure_crop_tables互換）
+-- 初期作物データ（FAMIC表記に統一）
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('小麦(春播)', '穀物', 'イネ科', 1);
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('小麦(秋播)', '穀物', 'イネ科', 2);
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('だいず', '豆類', 'マメ科', 3);
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('てんさい', '根菜', 'アカザ科', 4);
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('ばれいしょ', '根菜', 'ナス科', 5);
 INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('あずき', '豆類', 'マメ科', 6);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('たまねぎ', '野菜', 'ユリ科', 7);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('にんじん', '野菜', 'セリ科', 8);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('かぼちゃ', '野菜', 'ウリ科', 9);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('スイートコーン', '穀物', 'イネ科', 10);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('春小麦', '穀物', 'イネ科', 11);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('秋小麦', '穀物', 'イネ科', 12);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('大豆', '豆類', 'マメ科', 13);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('馬鈴薯', '根菜', 'ナス科', 14);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('デントコーン', '穀物', 'イネ科', 15);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('WCS', '穀物', 'イネ科', 16);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('キャベツ', '野菜', 'アブラナ科', 17);
-INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('だいこん', '野菜', 'アブラナ科', 18);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('にんじん', '野菜', 'セリ科', 7);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('かぼちゃ', '野菜', 'ウリ科', 8);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('キャベツ', '野菜', 'アブラナ科', 9);
+INSERT OR IGNORE INTO crop_master (name, category, family, display_order) VALUES ('だいこん', '野菜', 'アブラナ科', 10);
 
 -- ═══════════════════════════════════════════════════════════════
 -- 14. ユーザー作物

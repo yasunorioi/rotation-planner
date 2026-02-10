@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>輪作計画ソルバー テスト</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #2c3e50;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #34495e;
+      margin-top: 30px;
+    }
+    .panel {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #555;
+    }
+    textarea, input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    textarea {
+      height: 120px;
+      font-family: monospace;
+    }
+    button {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+    button:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+    .progress {
+      margin-top: 10px;
+      padding: 10px;
+      background: #ecf0f1;
+      border-radius: 4px;
+      display: none;
+    }
+    .progress.active {
+      display: block;
+    }
+    .progress-bar {
+      height: 20px;
+      background: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3498db, #2ecc71);
+      transition: width 0.3s;
+    }
+    .progress-text {
+      margin-top: 5px;
+      font-size: 14px;
+      color: #666;
+    }
+    .result {
+      margin-top: 20px;
+    }
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .score {
+      font-size: 24px;
+      font-weight: bold;
+      color: #27ae60;
+    }
+    .elapsed {
+      color: #7f8c8d;
+      font-size: 14px;
+    }
+    .errors {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+    }
+    .errors h4 {
+      margin: 0 0 5px 0;
+      color: #856404;
+    }
+    .errors ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background: #3498db;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    .table-wrapper {
+      overflow-x: auto;
+    }
+    .crop-color {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>🌾 輪作計画ソルバー テスト</h1>
+
+  <div class="panel">
+    <h2>入力データ</h2>
+
+    <div class="grid">
+      <div class="form-group">
+        <label>ほ場データ (JSON)</label>
+        <textarea id="fields">[
+  {"fieldId": "1", "fieldCode": "A-1", "district": "北", "areaHa": 2.5, "history": {"R5": "大豆", "R6": "春小麦"}, "beetForbidden": false},
+  {"fieldId": "2", "fieldCode": "A-2", "district": "北", "areaHa": 3.0, "history": {"R5": "てんさい", "R6": "大豆"}, "beetForbidden": false},
+  {"fieldId": "3", "fieldCode": "B-1", "district": "南", "areaHa": 2.0, "history": {"R5": "春小麦", "R6": "デントコーン"}, "beetForbidden": false},
+  {"fieldId": "4", "fieldCode": "B-2", "district": "南", "areaHa": 2.5, "history": {"R5": "馬鈴薯", "R6": "春小麦"}, "beetForbidden": false},
+  {"fieldId": "5", "fieldCode": "C-1", "district": "東", "areaHa": 3.5, "history": {"R5": "秋小麦", "R6": "大豆"}, "beetForbidden": true}
+]</textarea>
+      </div>
+
+      <div class="form-group">
+        <label>制約設定 (JSON)</label>
+        <textarea id="constraints">{
+  "cropMins": {},
+  "cropCaps": {"春小麦": 8, "秋小麦": 8, "大豆": 10},
+  "minGapYears": {"てんさい": 4, "馬鈴薯": 4},
+  "minFields": {"てんさい": 1},
+  "maxFields": {"てんさい": 2},
+  "forbiddenTransitions": [["てんさい", "秋小麦"], ["春小麦", "秋小麦"]],
+  "preferredTransitions": {"てんさい->大豆": 10, "デントコーン->秋小麦": 8},
+  "mainCrops": ["春小麦", "秋小麦", "大豆"],
+  "unknownMode": "ignore"
+}</textarea>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="form-group">
+        <label>作物リスト（改行区切り）</label>
+        <textarea id="crops">春小麦
+秋小麦
+大豆
+デントコーン
+てんさい
+馬鈴薯</textarea>
+      </div>
+
+      <div>
+        <div class="form-group">
+          <label>過去年（カンマ区切り）</label>
+          <input type="text" id="pastYears" value="R5, R6">
+        </div>
+        <div class="form-group">
+          <label>将来年（カンマ区切り）</label>
+          <input type="text" id="futureYears" value="R7, R8, R9, R10">
+        </div>
+        <div class="form-group">
+          <label>最大反復回数</label>
+          <input type="number" id="maxIterations" value="2000" min="100" max="10000">
+        </div>
+      </div>
+    </div>
+
+    <button id="solveBtn" onclick="runSolver()">🔄 最適化実行</button>
+    <button onclick="runWorkerSolver()" style="margin-left: 10px; background: #27ae60;">🧵 Web Worker で実行</button>
+
+    <div id="progress" class="progress">
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+      </div>
+      <div id="progressText" class="progress-text">準備中...</div>
+    </div>
+  </div>
+
+  <div id="resultPanel" class="panel result" style="display: none;">
+    <h2>結果</h2>
+
+    <div class="result-header">
+      <div>
+        <span class="score" id="score"></span>
+        <span id="elapsed" class="elapsed"></span>
+      </div>
+    </div>
+
+    <div id="errors" class="errors" style="display: none;">
+      <h4>⚠️ 警告/違反</h4>
+      <ul id="errorList"></ul>
+    </div>
+
+    <h3>ほ場×年 計画表</h3>
+    <div class="table-wrapper">
+      <table id="fieldTable"></table>
+    </div>
+
+    <h3>年別 作物面積(ha)</h3>
+    <div class="table-wrapper">
+      <table id="summaryTable"></table>
+    </div>
+  </div>
+
+  <!-- ソルバーをインポート（ES Module） -->
+  <script type="module">
+    import { RotationSolver, createDefaultConstraints, generateResultTables } from './src/rotationSolver.mjs';
+
+    // グローバルに公開
+    window.RotationSolver = RotationSolver;
+    window.createDefaultConstraints = createDefaultConstraints;
+    window.generateResultTables = generateResultTables;
+  </script>
+
+  <script>
+    // 作物ごとの色
+    const cropColors = {
+      '春小麦': '#f39c12',
+      '秋小麦': '#e67e22',
+      '大豆': '#27ae60',
+      'デントコーン': '#2ecc71',
+      'WCS': '#1abc9c',
+      'てんさい': '#9b59b6',
+      '馬鈴薯': '#e74c3c',
+      'キャベツ': '#3498db',
+      'にんじん': '#f1c40f',
+      'だいこん': '#ecf0f1'
+    };
+
+    function getCropColor(crop) {
+      return cropColors[crop] || '#95a5a6';
+    }
+
+    function parseInput() {
+      const fields = JSON.parse(document.getElementById('fields').value);
+      const constraints = JSON.parse(document.getElementById('constraints').value);
+      const crops = document.getElementById('crops').value
+        .split('\n')
+        .map(c => c.trim())
+        .filter(c => c);
+      const pastYears = document.getElementById('pastYears').value
+        .split(',')
+        .map(y => y.trim())
+        .filter(y => y);
+      const futureYears = document.getElementById('futureYears').value
+        .split(',')
+        .map(y => y.trim())
+        .filter(y => y);
+      const maxIterations = parseInt(document.getElementById('maxIterations').value);
+
+      return { fields, constraints, crops, pastYears, futureYears, maxIterations };
+    }
+
+    function showProgress(phase, progress) {
+      const progressEl = document.getElementById('progress');
+      const fillEl = document.getElementById('progressFill');
+      const textEl = document.getElementById('progressText');
+
+      progressEl.classList.add('active');
+      fillEl.style.width = progress + '%';
+      textEl.textContent = `${phase} (${progress}%)`;
+    }
+
+    function hideProgress() {
+      document.getElementById('progress').classList.remove('active');
+    }
+
+    function showResult(data) {
+      const { plan, score, errors, fieldTable, summaryTable, elapsedMs } = data;
+
+      document.getElementById('resultPanel').style.display = 'block';
+      document.getElementById('score').textContent = `スコア: ${score.toFixed(1)}`;
+      document.getElementById('elapsed').textContent = `(${elapsedMs}ms)`;
+
+      // エラー表示
+      const errorsEl = document.getElementById('errors');
+      const errorListEl = document.getElementById('errorList');
+      if (errors && errors.length > 0) {
+        errorsEl.style.display = 'block';
+        errorListEl.innerHTML = errors.map(e => `<li>${e}</li>`).join('');
+      } else {
+        errorsEl.style.display = 'none';
+      }
+
+      // ほ場テーブル
+      const fieldTableEl = document.getElementById('fieldTable');
+      if (fieldTable.length > 0) {
+        const headers = Object.keys(fieldTable[0]);
+        let html = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+        for (const row of fieldTable) {
+          html += '<tr>';
+          for (const h of headers) {
+            const val = row[h];
+            if (typeof val === 'string' && cropColors[val]) {
+              html += `<td><span class="crop-color" style="background: ${getCropColor(val)}; color: white;">${val}</span></td>`;
+            } else {
+              html += `<td>${val}</td>`;
+            }
+          }
+          html += '</tr>';
+        }
+        fieldTableEl.innerHTML = html;
+      }
+
+      // サマリーテーブル
+      const summaryTableEl = document.getElementById('summaryTable');
+      if (summaryTable.length > 0) {
+        const headers = Object.keys(summaryTable[0]);
+        let html = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+        for (const row of summaryTable) {
+          html += '<tr>';
+          for (const h of headers) {
+            html += `<td>${row[h]}</td>`;
+          }
+          html += '</tr>';
+        }
+        summaryTableEl.innerHTML = html;
+      }
+    }
+
+    // 同期実行（メインスレッド）
+    window.runSolver = function() {
+      const btn = document.getElementById('solveBtn');
+      btn.disabled = true;
+
+      try {
+        showProgress('解析中', 10);
+        const { fields, constraints, crops, pastYears, futureYears, maxIterations } = parseInput();
+
+        const startTime = performance.now();
+
+        showProgress('最適化計算中', 30);
+        const solver = new RotationSolver(fields, pastYears, futureYears, crops, constraints);
+        const { plan, score, errors } = solver.solve({ maxIterations });
+
+        showProgress('結果生成中', 80);
+        const { fieldTable, summaryTable } = generateResultTables(fields, pastYears, futureYears, plan, crops);
+
+        const elapsedMs = Math.round(performance.now() - startTime);
+
+        showProgress('完了', 100);
+        setTimeout(() => {
+          hideProgress();
+          showResult({ plan, score, errors, fieldTable, summaryTable, elapsedMs });
+        }, 300);
+
+      } catch (e) {
+        alert('エラー: ' + e.message);
+        hideProgress();
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    // Web Worker 実行
+    window.runWorkerSolver = function() {
+      try {
+        showProgress('Worker起動中', 5);
+        const { fields, constraints, crops, pastYears, futureYears, maxIterations } = parseInput();
+
+        const worker = new Worker('./src/rotationWorker.js');
+
+        worker.onmessage = function(e) {
+          const { type, data, phase, progress, message } = e.data;
+
+          if (type === 'ready') {
+            // Worker準備完了、計算開始
+            worker.postMessage({
+              type: 'solve',
+              data: {
+                fields,
+                pastYears,
+                futureYears,
+                crops,
+                constraints,
+                options: { maxIterations }
+              }
+            });
+          } else if (type === 'progress') {
+            showProgress(phase, progress);
+          } else if (type === 'result') {
+            hideProgress();
+            showResult(data);
+            worker.terminate();
+          } else if (type === 'error') {
+            hideProgress();
+            alert('エラー: ' + message);
+            worker.terminate();
+          }
+        };
+
+        worker.onerror = function(e) {
+          hideProgress();
+          alert('Worker エラー: ' + e.message);
+          worker.terminate();
+        };
+
+      } catch (e) {
+        alert('エラー: ' + e.message);
+        hideProgress();
+      }
+    };
+  </script>
+</body>
+</html>

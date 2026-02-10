@@ -40,6 +40,15 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
+    class _DummyColors:
+        grey = None
+        whitesmoke = None
+        white = None
+        @staticmethod
+        def HexColor(v): return None
+    colors = _DummyColors()
+    Table = None
+    TableStyle = None
 
 
 # =============================================================================

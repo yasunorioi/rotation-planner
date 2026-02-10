@@ -1,15 +1,14 @@
 """
 rotation_planner.field.spatial - 空間演算モジュール
 
-Shapely + pyprojを使った座標変換、面積計算、地目判定機能を提供。
+Shapely + pyprojを使った座標変換、面積計算機能を提供。
 
 Usage:
     from rotation_planner.field.spatial import (
         coords_to_shapely, shapely_to_coords,
         geojson_to_shapely, shapely_to_geojson,
         calculate_geodesic_area_ha,
-        determine_land_category, split_crop_by_land_category,
-        merge_paddy_polygons
+        merge_paddy_polygons,
     )
 """
 
@@ -26,7 +25,7 @@ from rotation_planner.common.models import LandCategory
 # 座標変換関数
 # =============================================================================
 
-def coords_to_shapely(coords: list[list[float]]) -> Polygon:
+def coords_to_shapely(coords: list) -> Polygon:
     """
     [[lat, lng], ...] 形式 → Shapely Polygon
 
@@ -35,26 +34,19 @@ def coords_to_shapely(coords: list[list[float]]) -> Polygon:
 
     Returns:
         Shapely Polygon（座標は (lng, lat) 形式）
-
-    Notes:
-        - 既存コードの座標形式は [lat, lng]
-        - Shapely は (x, y) = (lng, lat) なので変換が必要
-        - 最初と最後の座標が同じでなければ自動的に閉じる
     """
     if len(coords) < 3:
         raise ValueError("ポリゴンには最低3点の座標が必要です")
 
-    # [lat, lng] → (lng, lat) に変換
     coords_lnglat = [(coord[1], coord[0]) for coord in coords]
 
-    # ポリゴンを閉じる（最初と最後が同じでなければ）
     if coords_lnglat[0] != coords_lnglat[-1]:
         coords_lnglat.append(coords_lnglat[0])
 
     return Polygon(coords_lnglat)
 
 
-def shapely_to_coords(polygon: Polygon) -> list[list[float]]:
+def shapely_to_coords(polygon: Polygon) -> list:
     """
     Shapely Polygon → [[lat, lng], ...] 形式
 
@@ -64,8 +56,6 @@ def shapely_to_coords(polygon: Polygon) -> list[list[float]]:
     Returns:
         [[lat, lng], ...] 形式の座標リスト
     """
-    # Shapely の exterior.coords は (lng, lat) 形式
-    # [lat, lng] 形式に戻す
     coords = [[lat, lng] for lng, lat in polygon.exterior.coords[:-1]]
     return coords
 
@@ -79,9 +69,6 @@ def geojson_to_shapely(geojson_str: str) -> Union[Polygon, MultiPolygon]:
 
     Returns:
         Shapely Polygon or MultiPolygon
-
-    Raises:
-        ValueError: 不正なGeoJSON形式
     """
     try:
         geojson_dict = json.loads(geojson_str)
@@ -119,145 +106,32 @@ def calculate_geodesic_area_ha(polygon: Polygon) -> float:
     """
     Shapely Polygon → 測地線面積（ヘクタール）
 
+    WGS84楕円体上の面積をpyproj.Geodで正確に計算。
+
     Args:
         polygon: Shapely Polygon（座標は (lng, lat) 形式）
 
     Returns:
         面積（ヘクタール）
-
-    Notes:
-        - WGS84楕円体上の面積を正確に計算
-        - pyproj.Geod を使用
-        - Shapely座標は (lng, lat) なので、そのまま渡せる
     """
     if polygon.is_empty:
         return 0.0
 
-    # 外周の座標を取得
     coords = list(polygon.exterior.coords)
-
-    # 座標リストを分離
     lons = [c[0] for c in coords]
     lats = [c[1] for c in coords]
 
-    # Geod（測地線計算）を使用して面積を計算
     geod = Geod(ellps="WGS84")
-
-    # polygon_area_perimeter は (面積, 周長) を返す
-    # 面積は符号付きで返されるので abs() を使用
     area_m2, _ = geod.polygon_area_perimeter(lons, lats)
 
-    # 平方メートルをヘクタールに変換（1ha = 10,000m²）
-    area_ha = abs(area_m2) / 10000.0
-
-    return area_ha
+    return abs(area_m2) / 10000.0
 
 
 # =============================================================================
-# 地目判定関数
+# ポリゴン結合関数
 # =============================================================================
 
-def determine_land_category(
-    crop_geom: Polygon,
-    paddy_polygons: list[dict]
-) -> list[tuple[Polygon, LandCategory, float]]:
-    """
-    作付けポリゴンと水田ポリゴン群を空間演算し、地目別に分割する。
-
-    Args:
-        crop_geom: 作付けポリゴン（Shapely Polygon）
-        paddy_polygons: 水田ポリゴンのリスト。各dictは:
-            {'geometry': GeoJSON文字列, 'is_converted': bool}
-
-    Returns:
-        [(polygon, land_category, area_ha), ...] のリスト
-        - 水田ポリゴンとの交差部分 → PADDY or CONVERTED
-        - 残り部分 → FIELD
-
-    Raises:
-        ValueError: 不正なGeoJSON形式
-    """
-    result = []
-    remaining_geom = crop_geom
-
-    # 各水田ポリゴンと交差計算
-    for paddy_data in paddy_polygons:
-        # GeoJSON文字列をShapelyに変換
-        paddy_geom = geojson_to_shapely(paddy_data['geometry'])
-        is_converted = paddy_data.get('is_converted', False)
-
-        # 交差部分を計算
-        intersection = crop_geom.intersection(paddy_geom)
-
-        # 交差部分が空でなければ結果に追加
-        if not intersection.is_empty:
-            # MultiPolygonの場合は各Polygonを個別に処理
-            if isinstance(intersection, MultiPolygon):
-                for poly in intersection.geoms:
-                    if not poly.is_empty:
-                        area_ha = calculate_geodesic_area_ha(poly)
-                        category = LandCategory.CONVERTED if is_converted else LandCategory.PADDY
-                        result.append((poly, category, area_ha))
-            elif isinstance(intersection, Polygon):
-                area_ha = calculate_geodesic_area_ha(intersection)
-                category = LandCategory.CONVERTED if is_converted else LandCategory.PADDY
-                result.append((intersection, category, area_ha))
-
-            # 残り部分を更新
-            remaining_geom = remaining_geom.difference(paddy_geom)
-
-    # 残り部分を FIELD として追加
-    if not remaining_geom.is_empty:
-        # MultiPolygonの場合は各Polygonを個別に処理
-        if isinstance(remaining_geom, MultiPolygon):
-            for poly in remaining_geom.geoms:
-                if not poly.is_empty:
-                    area_ha = calculate_geodesic_area_ha(poly)
-                    result.append((poly, LandCategory.FIELD, area_ha))
-        elif isinstance(remaining_geom, Polygon):
-            area_ha = calculate_geodesic_area_ha(remaining_geom)
-            result.append((remaining_geom, LandCategory.FIELD, area_ha))
-
-    return result
-
-
-def split_crop_by_land_category(
-    crop_geojson: str,
-    paddy_polygons: list[dict]
-) -> list[dict]:
-    """
-    DB格納形式のラッパー。作付けポリゴンを地目別に分割。
-
-    Args:
-        crop_geojson: 作付けポリゴンのGeoJSON文字列
-        paddy_polygons: DBから取得した水田ポリゴンのリスト
-            [{'geometry': geojson_str, 'is_converted': bool}, ...]
-
-    Returns:
-        [{'geometry': geojson_str, 'land_category': LandCategory, 'area_ha': float}, ...]
-
-    Raises:
-        ValueError: 不正なGeoJSON形式
-    """
-    # GeoJSON文字列をShapelyに変換
-    crop_geom = geojson_to_shapely(crop_geojson)
-
-    # 地目判定
-    parts = determine_land_category(crop_geom, paddy_polygons)
-
-    # 結果をDB格納形式に変換
-    result = []
-    for poly, category, area_ha in parts:
-        result.append({
-            'geometry': shapely_to_geojson(poly),
-            'land_category': category,
-            'area_ha': area_ha
-        })
-
-    return result
-
-
-def merge_paddy_polygons(geojson_list: list[str]) -> str:
+def merge_paddy_polygons(geojson_list: list) -> str:
     """
     複数の水田ポリゴンを結合（unary_union）してGeoJSON文字列を返す。
 
@@ -266,25 +140,13 @@ def merge_paddy_polygons(geojson_list: list[str]) -> str:
 
     Returns:
         結合されたポリゴンのGeoJSON文字列
-
-    Raises:
-        ValueError: 不正なGeoJSON形式、または空のリスト
-
-    Notes:
-        - 合筆等で使用
-        - unary_union は隣接するポリゴンを結合し、重複部分を除去
-        - 結果はPolygonまたはMultiPolygonになる可能性がある
     """
     if not geojson_list:
         raise ValueError("結合するポリゴンが指定されていません")
 
-    # 全てのGeoJSONをShapelyに変換
     polygons = [geojson_to_shapely(gj) for gj in geojson_list]
-
-    # unary_union で結合
     merged = unary_union(polygons)
 
-    # GeoJSON文字列に変換して返す
     return shapely_to_geojson(merged)
 
 
@@ -304,9 +166,6 @@ def _meters_to_degrees(meters: float, latitude: float = 43.0) -> float:
         概算の度数
     """
     import math
-    # 緯度方向: 1度 ≈ 111,320m
-    # 経度方向: 1度 ≈ 111,320m × cos(lat)
-    # 平均を取って概算（バッファは等方的なので）
     lat_m_per_deg = 111320.0
     lng_m_per_deg = 111320.0 * math.cos(math.radians(latitude))
     avg_m_per_deg = (lat_m_per_deg + lng_m_per_deg) / 2.0
@@ -328,7 +187,6 @@ def build_adjacency_graph(
     Returns:
         {field_code: [隣接field_code, ...]} の隣接リスト
     """
-    # 座標ありのほ場のみ処理
     valid_fields = []
     for f in fields:
         coords_json = f.get('coordinates_json')
@@ -344,7 +202,6 @@ def build_adjacency_graph(
 
     buf_deg = _meters_to_degrees(buffer_meters)
 
-    # 隣接リスト構築
     adjacency: dict[str, list[str]] = {code: [] for code, _ in valid_fields}
 
     for i in range(len(valid_fields)):
@@ -383,8 +240,92 @@ def get_adjacent_field_pairs(
 
 
 # =============================================================================
-# エクスポート
+# 地目判定関数
 # =============================================================================
+
+def determine_land_category(
+    crop_geom: Polygon,
+    paddy_polygons: list
+) -> list:
+    """
+    作付けポリゴンと水田ポリゴン群を空間演算し、地目別に分割する。
+
+    Args:
+        crop_geom: 作付けポリゴン（Shapely Polygon）
+        paddy_polygons: 水田ポリゴンのリスト。各dictは:
+            {'geometry': GeoJSON文字列, 'is_converted': bool/int,
+             'conversion_start_year': int|None}
+
+    Returns:
+        [(polygon, LandCategory, area_ha, conversion_start_year|None), ...] のリスト
+    """
+    result = []
+    remaining_geom = crop_geom
+
+    for paddy_data in paddy_polygons:
+        paddy_geom = geojson_to_shapely(paddy_data['geometry'])
+        is_converted = bool(paddy_data.get('is_converted', False))
+        conv_year = paddy_data.get('conversion_start_year')
+
+        intersection = crop_geom.intersection(paddy_geom)
+
+        if not intersection.is_empty:
+            if isinstance(intersection, MultiPolygon):
+                for poly in intersection.geoms:
+                    if not poly.is_empty:
+                        area_ha = calculate_geodesic_area_ha(poly)
+                        category = LandCategory.CONVERTED if is_converted else LandCategory.PADDY
+                        result.append((poly, category, area_ha, conv_year if is_converted else None))
+            elif isinstance(intersection, Polygon):
+                area_ha = calculate_geodesic_area_ha(intersection)
+                category = LandCategory.CONVERTED if is_converted else LandCategory.PADDY
+                result.append((intersection, category, area_ha, conv_year if is_converted else None))
+
+            remaining_geom = remaining_geom.difference(paddy_geom)
+
+    if not remaining_geom.is_empty:
+        if isinstance(remaining_geom, MultiPolygon):
+            for poly in remaining_geom.geoms:
+                if not poly.is_empty:
+                    area_ha = calculate_geodesic_area_ha(poly)
+                    result.append((poly, LandCategory.FIELD, area_ha, None))
+        elif isinstance(remaining_geom, Polygon):
+            area_ha = calculate_geodesic_area_ha(remaining_geom)
+            result.append((remaining_geom, LandCategory.FIELD, area_ha, None))
+
+    return result
+
+
+def split_crop_by_land_category(
+    crop_geojson: str,
+    paddy_polygons: list
+) -> list:
+    """
+    DB格納形式のラッパー。作付けポリゴンを地目別に分割。
+
+    Args:
+        crop_geojson: 作付けポリゴンのGeoJSON文字列
+        paddy_polygons: DBから取得した水田ポリゴンのリスト
+
+    Returns:
+        [{'geometry': geojson_str, 'land_category': LandCategory,
+          'area_ha': float, 'conversion_start_year': int|None}, ...]
+    """
+    crop_geom = geojson_to_shapely(crop_geojson)
+
+    parts = determine_land_category(crop_geom, paddy_polygons)
+
+    result = []
+    for poly, category, area_ha, conv_year in parts:
+        result.append({
+            'geometry': shapely_to_geojson(poly),
+            'land_category': category,
+            'area_ha': area_ha,
+            'conversion_start_year': conv_year
+        })
+
+    return result
+
 
 __all__ = [
     'coords_to_shapely',
@@ -392,9 +333,10 @@ __all__ = [
     'geojson_to_shapely',
     'shapely_to_geojson',
     'calculate_geodesic_area_ha',
-    'determine_land_category',
-    'split_crop_by_land_category',
     'merge_paddy_polygons',
     'build_adjacency_graph',
     'get_adjacent_field_pairs',
+    'determine_land_category',
+    'split_crop_by_land_category',
+    'LandCategory',
 ]

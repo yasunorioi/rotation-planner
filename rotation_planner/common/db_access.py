@@ -351,6 +351,24 @@ class CropHistoryRepository:
             return rows_to_list(cursor.fetchall())
 
     @staticmethod
+    def get_history_by_id(history_id: int) -> Optional[Dict[str, Any]]:
+        """
+        履歴IDで作付履歴を取得
+
+        Args:
+            history_id: 履歴ID
+
+        Returns:
+            履歴データ（id, field_id, year, crop, is_inferred）、存在しなければNone
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM crop_history WHERE id = ?
+            """, (history_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
     def delete_history(field_id: int, year: str) -> bool:
         """
         特定ほ場・年度の履歴を削除
@@ -375,6 +393,23 @@ class CropHistoryRepository:
         except sqlite3.Error as e:
             logger.error(f"操作失敗: 作付履歴削除 field_id={field_id} year={year} - {e}")
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
+
+    @staticmethod
+    def delete_history_by_id(history_id: int) -> bool:
+        """
+        履歴IDで作付履歴を削除
+
+        Args:
+            history_id: 履歴ID
+
+        Returns:
+            削除成功ならTrue
+        """
+        with get_db() as conn:
+            cursor = conn.execute("""
+                DELETE FROM crop_history WHERE id = ?
+            """, (history_id,))
+            return cursor.rowcount > 0
 
     @staticmethod
     def bulk_update_history(updates: List[Dict[str, Any]]) -> int:
@@ -818,7 +853,7 @@ class JAStaffRepository:
                 if r.get('order_data_json'):
                     try:
                         r['order_data'] = json.loads(r['order_data_json'])
-                    except (ValueError, json.JSONDecodeError) as e:
+                    except (ValueError, json.JSONDecodeError):
                         r['order_data'] = {}
                 else:
                     r['order_data'] = {}
@@ -865,7 +900,7 @@ class JAStaffRepository:
 
                 try:
                     order_data = json.loads(order_data_json)
-                except (ValueError, json.JSONDecodeError) as e:
+                except (ValueError, json.JSONDecodeError):
                     continue
 
                 summary = order_data.get('summary', [])
@@ -1140,6 +1175,68 @@ class PesticideMasterRepository:
 # =============================================================================
 # 作物マスタリポジトリ
 # =============================================================================
+
+def ensure_crop_tables():
+    """
+    crop_master と user_crops テーブルが存在しない場合は作成し、初期データを投入する
+    """
+    with get_db() as conn:
+        # crop_master テーブル
+        cursor = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='crop_master'
+        """)
+        if cursor.fetchone() is None:
+            conn.execute("""
+                CREATE TABLE crop_master (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    category TEXT,
+                    family TEXT DEFAULT NULL,
+                    display_order INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # 初期データ投入（FAMIC表記に準拠）
+            initial_crops = [
+                ('小麦(春播)', '穀物', 1, 'イネ科'),
+                ('小麦(秋播)', '穀物', 2, 'イネ科'),
+                ('だいず', '豆類', 3, 'マメ科'),
+                ('てんさい', '根菜', 4, 'アカザ科'),
+                ('ばれいしょ', '根菜', 5, 'ナス科'),
+                ('あずき', '豆類', 6, 'マメ科'),
+                ('たまねぎ', '野菜', 7, 'ユリ科'),
+                ('にんじん', '野菜', 8, 'セリ科'),
+                ('かぼちゃ', '野菜', 9, 'ウリ科'),
+                ('スイートコーン', '穀物', 10, 'イネ科'),
+            ]
+            for name, category, order, family in initial_crops:
+                conn.execute("""
+                    INSERT INTO crop_master (name, category, display_order, family)
+                    VALUES (?, ?, ?, ?)
+                """, (name, category, order, family))
+
+        # user_crops テーブル
+        cursor = conn.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='user_crops'
+        """)
+        if cursor.fetchone() is None:
+            conn.execute("""
+                CREATE TABLE user_crops (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    parent_crop_id INTEGER NOT NULL,
+                    custom_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (parent_crop_id) REFERENCES crop_master(id),
+                    UNIQUE(user_id, parent_crop_id, custom_name)
+                )
+            """)
+
+        conn.commit()
+
 
 class CropMasterRepository:
     """作物マスタのCRUD操作（JA管理）"""
@@ -1943,6 +2040,31 @@ class PesticideUsageRepository:
             return [dict(row) for row in cursor.fetchall()]
 
     @staticmethod
+    def get_distinct_crops(keyword: str = None, limit: int = 50) -> List[str]:
+        """FAMIC適用情報からユニークな作物名一覧を取得"""
+        with get_db() as conn:
+            if keyword:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT crop FROM pesticide_usage
+                    WHERE crop LIKE ?
+                    ORDER BY crop
+                    LIMIT ?
+                    """,
+                    (f"%{keyword}%", limit)
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT crop FROM pesticide_usage
+                    ORDER BY crop
+                    LIMIT ?
+                    """,
+                    (limit,)
+                )
+            return [row[0] for row in cursor.fetchall() if row[0]]
+
+    @staticmethod
     def get_for_pesticide_and_crop(pesticide_id: int, crop: str) -> List[Dict[str, Any]]:
         """特定農薬×作物の適用情報を取得"""
         with get_db() as conn:
@@ -2173,8 +2295,270 @@ class OrderTemplateRepository:
 
 
 # =============================================================================
+# 在庫テーブル初期化
+# =============================================================================
+
+def ensure_inventory_tables():
+    """
+    inventory関連テーブルのマイグレーション
+    - inventoryテーブルに新カラム追加（既存データ保持）
+    - inventory_transactionsテーブル作成
+    - inventory_csv_operationsテーブル作成
+    """
+    with get_db() as conn:
+        # 1. inventoryテーブルにカラム追加（既存チェック付き）
+        cursor = conn.execute("PRAGMA table_info(inventory)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        new_columns = [
+            ("storage_location", "TEXT"),
+            ("expiry_date", "DATE"),
+            ("purchase_date", "DATE"),
+            ("purchase_price", "REAL"),
+            ("supplier", "TEXT"),
+            ("lot_number", "TEXT"),
+            ("last_used_date", "DATE"),
+            ("usage_count", "INTEGER DEFAULT 0"),
+        ]
+
+        for col_name, col_type in new_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(f"ALTER TABLE inventory ADD COLUMN {col_name} {col_type}")
+                except Exception as e:
+                    print(f"Warning: Failed to add column {col_name}: {e}")
+
+        # 2. inventory_transactionsテーブル
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+                transaction_type TEXT NOT NULL CHECK (transaction_type IN ('in', 'out', 'adjust')),
+                quantity REAL NOT NULL,
+                unit TEXT,
+                reference_type TEXT,
+                reference_id INTEGER,
+                notes TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_inventory ON inventory_transactions(inventory_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_type ON inventory_transactions(transaction_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_trans_created ON inventory_transactions(created_at)")
+
+        # 3. inventory_csv_operationsテーブル
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS inventory_csv_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation_type TEXT NOT NULL CHECK (operation_type IN ('import', 'export')),
+                filename TEXT,
+                record_count INTEGER,
+                status TEXT CHECK (status IN ('success', 'partial', 'failed')),
+                error_message TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_csv_ops_type ON inventory_csv_operations(operation_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_csv_ops_created ON inventory_csv_operations(created_at)")
+
+        conn.commit()
+
+
+# =============================================================================
+# 在庫リポジトリ
+# =============================================================================
+
+class InventoryRepository:
+    """在庫管理のリポジトリ"""
+
+    @staticmethod
+    def get_inventory_by_pesticide(user_id: int, pesticide_name: str) -> Optional[Dict[str, Any]]:
+        """農薬名で在庫を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, pesticide_name, amount, unit,
+                       storage_location, expiry_date, last_used_date, usage_count, updated_at
+                FROM inventory
+                WHERE user_id = ? AND pesticide_name = ?
+                """,
+                (user_id, pesticide_name)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def get_inventory(inventory_id: int) -> Optional[Dict[str, Any]]:
+        """IDで在庫を取得"""
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, pesticide_name, amount, unit,
+                       storage_location, expiry_date, last_used_date, usage_count, updated_at
+                FROM inventory
+                WHERE id = ?
+                """,
+                (inventory_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def deduct_inventory(user_id: int, pesticide_name: str, quantity: float, unit: str,
+                         reference_type: str = None, reference_id: int = None,
+                         created_by: int = None) -> Dict[str, Any]:
+        """
+        在庫を控除し、取引履歴を記録
+
+        Returns:
+            {
+                "success": bool,
+                "warning": bool,  # 在庫不足の警告
+                "remaining": float,  # 残量
+                "deducted": float,  # 控除量
+                "message": str
+            }
+        """
+        with get_db() as conn:
+            # 在庫を取得（なければ作成）
+            cursor = conn.execute(
+                "SELECT id, amount, unit FROM inventory WHERE user_id = ? AND pesticide_name = ?",
+                (user_id, pesticide_name)
+            )
+            inv = cursor.fetchone()
+
+            warning = False
+            remaining = 0.0
+            inventory_id = None
+
+            if inv:
+                inventory_id = inv["id"]
+                current_amount = inv["amount"] or 0.0
+
+                # 単位が異なる場合は警告（変換は行わない）
+                if inv["unit"] and unit and inv["unit"] != unit:
+                    warning = True
+
+                remaining = current_amount - quantity
+
+                # 在庫不足チェック
+                if remaining < 0:
+                    warning = True
+
+                # 在庫を更新
+                conn.execute(
+                    """
+                    UPDATE inventory
+                    SET amount = ?, last_used_date = DATE('now'), usage_count = usage_count + 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (remaining, inventory_id)
+                )
+            else:
+                # 在庫レコードがない場合は新規作成（マイナス在庫）
+                cursor = conn.execute(
+                    """
+                    INSERT INTO inventory (user_id, pesticide_name, amount, unit, last_used_date, usage_count)
+                    VALUES (?, ?, ?, ?, DATE('now'), 1)
+                    """,
+                    (user_id, pesticide_name, -quantity, unit)
+                )
+                inventory_id = cursor.lastrowid
+                remaining = -quantity
+                warning = True  # 在庫がなかった
+
+            # 取引履歴を記録
+            if inventory_id:
+                conn.execute(
+                    """
+                    INSERT INTO inventory_transactions
+                    (inventory_id, transaction_type, quantity, unit, reference_type, reference_id, created_by)
+                    VALUES (?, 'out', ?, ?, ?, ?, ?)
+                    """,
+                    (inventory_id, quantity, unit, reference_type, reference_id, created_by)
+                )
+
+            conn.commit()
+
+            message = ""
+            if warning:
+                if remaining < 0:
+                    message = f"在庫不足: {pesticide_name} (残量: {remaining:.1f}{unit or ''})"
+                elif not inv:
+                    message = f"在庫未登録: {pesticide_name}"
+
+            return {
+                "success": True,
+                "warning": warning,
+                "remaining": remaining,
+                "deducted": quantity,
+                "message": message,
+                "inventory_id": inventory_id
+            }
+
+    @staticmethod
+    def get_transactions(inventory_id: int = None, user_id: int = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """取引履歴を取得"""
+        with get_db() as conn:
+            if inventory_id:
+                cursor = conn.execute(
+                    """
+                    SELECT t.*, i.pesticide_name
+                    FROM inventory_transactions t
+                    JOIN inventory i ON t.inventory_id = i.id
+                    WHERE t.inventory_id = ?
+                    ORDER BY t.created_at DESC
+                    LIMIT ?
+                    """,
+                    (inventory_id, limit)
+                )
+            elif user_id:
+                cursor = conn.execute(
+                    """
+                    SELECT t.*, i.pesticide_name
+                    FROM inventory_transactions t
+                    JOIN inventory i ON t.inventory_id = i.id
+                    WHERE i.user_id = ?
+                    ORDER BY t.created_at DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit)
+                )
+            else:
+                return []
+            return [dict(row) for row in cursor.fetchall()]
+
+
+# =============================================================================
 # 水田ポリゴン（Paddy Polygons）リポジトリ
 # =============================================================================
+
+def ensure_paddy_polygons_table():
+    """paddy_polygons テーブルが存在しない場合は作成する"""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS paddy_polygons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                field_id INTEGER NOT NULL,
+                geometry TEXT NOT NULL,
+                area_ha REAL NOT NULL,
+                is_converted INTEGER DEFAULT 0,
+                conversion_start_year INTEGER,
+                source TEXT DEFAULT 'manual',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (field_id) REFERENCES fields(id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_paddy_polygons_field_id
+            ON paddy_polygons(field_id)
+        """)
+        conn.commit()
+
 
 class PaddyPolygonRepository:
     """水田ポリゴンデータのCRUD操作"""
@@ -2379,6 +2763,29 @@ class PaddyPolygonRepository:
             raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
     @staticmethod
+    def get_stats(user_id: int) -> Dict[str, Any]:
+        """ユーザーの水田ポリゴン統計を取得"""
+        with get_db() as conn:
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) AS total_count,
+                    COALESCE(SUM(pp.area_ha), 0) AS total_area_ha,
+                    COALESCE(SUM(CASE WHEN pp.is_converted = 0 THEN pp.area_ha ELSE 0 END), 0) AS paddy_area_ha,
+                    COALESCE(SUM(CASE WHEN pp.is_converted = 1 THEN pp.area_ha ELSE 0 END), 0) AS converted_area_ha,
+                    SUM(CASE WHEN pp.is_converted = 0 THEN 1 ELSE 0 END) AS paddy_count,
+                    SUM(CASE WHEN pp.is_converted = 1 THEN 1 ELSE 0 END) AS converted_count
+                FROM paddy_polygons pp
+                JOIN fields f ON pp.field_id = f.id
+                WHERE f.user_id = ?
+            """, (user_id,))
+            row = cursor.fetchone()
+            return row_to_dict(row) if row else {
+                'total_count': 0, 'total_area_ha': 0,
+                'paddy_area_ha': 0, 'converted_area_ha': 0,
+                'paddy_count': 0, 'converted_count': 0
+            }
+
+    @staticmethod
     def get_converted(user_id: int) -> List[Dict[str, Any]]:
         """
         ユーザーの転作済み水田ポリゴンを取得
@@ -2426,6 +2833,34 @@ class PaddyPolygonRepository:
 # =============================================================================
 # 作物ポリゴン（Crop Polygons）リポジトリ
 # =============================================================================
+
+def ensure_crop_polygons_table():
+    """crop_polygons テーブルが存在しない場合は作成する"""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS crop_polygons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                field_id INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                crop_name TEXT NOT NULL,
+                geometry TEXT NOT NULL,
+                area_ha REAL NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (field_id) REFERENCES fields(id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crop_polygons_field_year
+            ON crop_polygons(field_id, year)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crop_polygons_year
+            ON crop_polygons(year)
+        """)
+        conn.commit()
+
 
 class CropPolygonRepository:
     """作物ポリゴンデータのCRUD操作"""

@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 import pandas as pd
 
 from rotation_planner.common.models import LandCategory, AggregationRow
@@ -34,12 +34,6 @@ class CropLandBreakdown:
 def aggregate_by_crop(breakdowns: List[CropLandBreakdown]) -> List[AggregationRow]:
     """
     CropLandBreakdown のリストを作物名でグループ化し、AggregationRow に集約。
-
-    ロジック:
-    1. crop_name でグループ化
-    2. 各グループ内で field_area_ha, paddy_area_ha を合計
-    3. converted_areas は年度別にマージ（同じ年度は面積を加算）
-    4. AggregationRow として返す
     """
     groups: Dict[str, List[CropLandBreakdown]] = {}
     for bd in breakdowns:
@@ -50,13 +44,10 @@ def aggregate_by_crop(breakdowns: List[CropLandBreakdown]) -> List[AggregationRo
         field_area = sum(bd.field_area_ha for bd in items)
         paddy_area = sum(bd.paddy_area_ha for bd in items)
 
-        # converted_areas を年度別にマージ
         merged_converted: Dict[Union[int, str], float] = {}
         for bd in items:
             for year_key, area in bd.converted_areas.items():
                 merged_converted[year_key] = merged_converted.get(year_key, 0.0) + area
-
-        total = field_area + paddy_area + sum(merged_converted.values())
 
         rows.append(AggregationRow(
             crop_name=crop_name,
@@ -75,15 +66,12 @@ def aggregate_by_crop(breakdowns: List[CropLandBreakdown]) -> List[AggregationRo
 def get_conversion_year_columns(rows: List[AggregationRow]) -> List[str]:
     """
     集計表で使用する畑地化年度の列名リストを返す。
-
-    全AggregationRowの converted_areas キーを収集し、昇順ソート。
     int年度は「畑地化(YYYY)」、'unknown'は「畑地化(不明)」に変換。
     """
     year_keys: set = set()
     for row in rows:
         year_keys.update(row.converted_areas.keys())
 
-    # int と str('unknown') を分離してソート
     int_keys = sorted(k for k in year_keys if isinstance(k, int))
     has_unknown = 'unknown' in year_keys
 
@@ -117,12 +105,10 @@ def build_cross_tabulation(rows: List[AggregationRow]) -> pd.DataFrame:
             "水田": row.paddy_area_ha,
             "合計": row.total_area,
         }
-        # 畑地化列を埋める
         for col in conversion_cols:
             if col == "畑地化(不明)":
                 record[col] = row.converted_areas.get('unknown', 0.0)
             else:
-                # 「畑地化(YYYY)」からYYYYを抽出
                 year_str = col.replace("畑地化(", "").replace(")", "")
                 try:
                     year_int = int(year_str)
@@ -134,9 +120,8 @@ def build_cross_tabulation(rows: List[AggregationRow]) -> pd.DataFrame:
 
     df = pd.DataFrame(data, columns=all_columns)
 
-    # 合計行を追加
     totals = {"作物": "合計"}
-    for col in all_columns[1:]:  # 「作物」列以外
+    for col in all_columns[1:]:
         totals[col] = df[col].sum()
 
     totals_df = pd.DataFrame([totals], columns=all_columns)
@@ -151,9 +136,7 @@ def build_cross_tabulation(rows: List[AggregationRow]) -> pd.DataFrame:
 
 def format_cross_table_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """
-    表示用フォーマット:
-    - 0.0 → '-'（ダッシュ）
-    - 小数点以下2桁
+    表示用フォーマット: 0.0→'-'、小数点以下2桁
     """
     display_df = df.copy()
 

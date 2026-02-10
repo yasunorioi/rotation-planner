@@ -89,7 +89,7 @@ class RotationPlannerHeuristic:
         return True
 
     def check_adjacency_constraint(self, field_idx: int, year: str, crop: str, plan: Dict) -> bool:
-        """隣接筆の同一科制約をチェック"""
+        """隣接筆の同一科制約をチェック（PRO機能）"""
         if not self.constraints.adjacent_family_enabled:
             return True
         family = self.constraints.crop_family_map.get(crop)
@@ -105,7 +105,7 @@ class RotationPlannerHeuristic:
                 neighbor_crop = plan.get((neighbor_idx, year))
                 if neighbor_crop:
                     neighbor_family = self.constraints.crop_family_map.get(neighbor_crop)
-                    if neighbor_family == family:
+                    if neighbor_family and neighbor_family == family:
                         return False
         return True
 
@@ -534,9 +534,9 @@ class RotationPlannerORTools:
                     field_over[c, y] = model.NewIntVar(0, self.num_fields, f'field_over_{c}_{y}')
                     model.Add(field_over[c, y] >= count - max_f)
 
-        # 制約9: 馬鈴薯・てんさい禁止ほ場
+        # 制約9: ばれいしょ・てんさい禁止ほ場（FAMIC表記）
         beet_idx = self.crop_to_idx.get("てんさい")
-        potato_idx = self.crop_to_idx.get("馬鈴薯")
+        potato_idx = self.crop_to_idx.get("ばれいしょ")
         for f_idx, fld in enumerate(self.fields):
             if fld.beet_forbidden:
                 for y in range(self.num_future_years):
@@ -550,7 +550,7 @@ class RotationPlannerORTools:
         adj_over = {}
         if self.constraints.adjacent_family_enabled and self.constraints.adjacency_pairs:
             # 科→作物インデックスリストを構築
-            family_to_crop_indices: dict[str, list[int]] = {}
+            family_to_crop_indices: Dict[str, List[int]] = {}
             for crop_name, family in self.constraints.crop_family_map.items():
                 c_idx = self.crop_to_idx.get(crop_name)
                 if c_idx is not None:

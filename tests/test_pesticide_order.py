@@ -256,7 +256,7 @@ class TestPesticideOrderList:
         # クリーンアップ
         try:
             PesticideOrderRepository.delete_order(order_id)
-        except:
+        except Exception:
             pass
 
     def test_load_saved_orders(self, saved_order):

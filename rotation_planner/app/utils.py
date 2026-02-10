@@ -108,19 +108,19 @@ def infer_crop_for_year(field: 'Field', year: str, crops: List[str],
                 if from_c == prev_crop:
                     excluded.add(to_c)
 
-    # 3. 間隔制約から推測（前後4年以内にてんさい・馬鈴薯があれば除外）
+    # 3. 間隔制約から推測（前後4年以内にてんさい・ばれいしょがあれば除外）
     for i, y in enumerate(years):
         if abs(i - year_idx) <= 4 and i != year_idx:
             c = field.history.get(y, "").replace("*", "")
             if c == "てんさい":
                 excluded.add("てんさい")
-            if c == "馬鈴薯":
-                excluded.add("馬鈴薯")
+            if c == "ばれいしょ":
+                excluded.add("ばれいしょ")
 
     # 4. beet_forbidden の場合
     if field.beet_forbidden:
         excluded.add("てんさい")
-        excluded.add("馬鈴薯")
+        excluded.add("ばれいしょ")
 
     # 5. 候補を決定
     candidates = [c for c in crops if c not in excluded]
@@ -148,7 +148,7 @@ def load_csv(file_path: str, area_unit: str) -> Tuple[List[Field], List[str], st
     """CSVを読み込んでFieldリストを返す"""
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
-    except:
+    except UnicodeDecodeError:
         df = pd.read_csv(file_path, encoding='shift_jis')
 
     # 列名の正規化（空白除去）

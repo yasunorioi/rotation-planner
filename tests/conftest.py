@@ -1,16 +1,45 @@
 """
-テスト共通フィクスチャ
+テスト共通設定 — Gradio未インストール環境での回避策 + DB一元管理 + フィクスチャ
 """
-import pytest
-import sqlite3
+import os
+import sys
+import types
 import tempfile
 import shutil
-import os
+import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 # プロジェクトルートをパスに追加
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Gradio およびGradio依存モジュールをモック（未インストール環境対応）
+for mod_name in [
+    'gradio', 'gradio.themes', 'gradio.components',
+    'gradio_folium',
+]:
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = MagicMock()
+
+# 共通テスト用DBパスを設定（全テストファイルで統一）
+_test_db_fd, _shared_test_db_path = tempfile.mkstemp(suffix='_test.db')
+os.close(_test_db_fd)
+
+import rotation_planner.common.db_access as _db_mod
+_db_mod.DB_PATH = Path(_shared_test_db_path)
+
+# db モジュールの DB_PATH も差し替え＆スキーマ初期化
+from rotation_planner.common import db as _db_mod2
+_db_mod2.DB_PATH = Path(_shared_test_db_path)
+_schema_path = Path(__file__).parent.parent / "db_schema.sql"
+if _schema_path.exists():
+    _conn = sqlite3.connect(_shared_test_db_path)
+    with open(_schema_path, 'r', encoding='utf-8') as _f:
+        _conn.executescript(_f.read())
+    _conn.close()
+    _db_mod2.init_db()
 
 
 # ============================================================

@@ -386,6 +386,7 @@ class CropPolygon:
         )
 
 
+
 @dataclass
 class AggregationRow:
     """集計表の1行（1作物の地目別面積）"""

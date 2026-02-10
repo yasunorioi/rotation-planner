@@ -3,6 +3,7 @@ rotation_planner.common.ui_utils - 共通UIユーティリティ
 
 全UIモジュールで使用する共通コンポーネント・関数。
 """
+import html as _html
 
 
 def format_alert(message: str, alert_type: str = "info") -> str:
@@ -34,7 +35,7 @@ def format_alert(message: str, alert_type: str = "info") -> str:
         font-size: 1.1em;
         font-weight: 500;
         margin: 10px 0;
-    ">{message}</div>
+    ">{_html.escape(message)}</div>
     """
 
 

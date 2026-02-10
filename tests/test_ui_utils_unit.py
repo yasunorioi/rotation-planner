@@ -62,21 +62,8 @@ class TestFormatAlert:
         # 赤色のテキスト色が設定されていることを確認（#721c24）
         assert "#721c24" in result
 
-    @pytest.mark.skip(reason="ui_utils.py未実装: HTMLエスケープ処理が必要（セキュリティ要件）")
     def test_UI_05_format_alert_xss_prevention(self):
-        """UI-05: format_alert XSS防止 → <script>タグがエスケープされる
-
-        【SKIP理由】
-        現在のui_utils.py実装ではHTMLエスケープが実装されていない。
-        messageをf-string内に直接埋め込んでいるため、XSS脆弱性がある。
-
-        【修正案】
-        ui_utils.pyのformat_alert()内でhtml.escape()を使用してエスケープする。
-        例: import html; escaped_msg = html.escape(message)
-
-        【RACE-001遵守】
-        他ファイル修正禁止のため、ui_utils.py修正は別タスクで対応すること。
-        """
+        """UI-05: format_alert XSS防止 → <script>タグがエスケープされる"""
         xss_payload = "<script>alert('xss')</script>"
         result = format_alert(xss_payload, "info")
 

@@ -46,6 +46,10 @@ if _schema_path.exists():
         "INSERT OR IGNORE INTO rotation_plans (id, user_id, name, start_year, end_year) "
         "VALUES (1, 3, 'テスト計画', 'R6', 'R10')"
     )
+    _conn.execute(
+        "INSERT OR IGNORE INTO fields (id, user_id, field_code, name, area_ha) "
+        "VALUES (1, 1, 'TEST001', 'テスト共有ほ場', 2.5)"
+    )
     _conn.commit()
     _conn.close()
 

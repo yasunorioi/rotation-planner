@@ -3225,7 +3225,7 @@ def create_paddy_polygon(req: PaddyPolygonCreate, current_user: Dict = Depends(g
     ensure_paddy_polygons_table()
 
     # ほ場の存在・所有確認
-    field = FieldRepository.get_field_by_id(req.field_id)
+    field = FieldRepository.get_field(req.field_id)
     if not field:
         raise HTTPException(status_code=404, detail=f"ほ場ID {req.field_id} が見つかりません")
     if field.get("user_id") != current_user["id"]:
@@ -3267,7 +3267,7 @@ def update_paddy_polygon(
     p = PaddyPolygonRepository.get_by_id(polygon_id)
     if not p:
         raise HTTPException(status_code=404, detail="水田ポリゴンが見つかりません")
-    field = FieldRepository.get_field_by_id(p["field_id"])
+    field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを更新する権限がありません")
 
@@ -3306,7 +3306,7 @@ def delete_paddy_polygon(polygon_id: int, current_user: Dict = Depends(get_curre
     p = PaddyPolygonRepository.get_by_id(polygon_id)
     if not p:
         raise HTTPException(status_code=404, detail="水田ポリゴンが見つかりません")
-    field = FieldRepository.get_field_by_id(p["field_id"])
+    field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを削除する権限がありません")
 
@@ -3393,7 +3393,7 @@ def get_crop_polygon(polygon_id: int, current_user: Dict = Depends(get_current_u
     p = CropPolygonRepository.get_by_id(polygon_id)
     if not p:
         raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
-    field = FieldRepository.get_field_by_id(p["field_id"])
+    field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンにアクセスする権限がありません")
     return _crop_polygon_to_response(p)
@@ -3407,7 +3407,7 @@ def create_crop_polygon(req: CropPolygonCreate, current_user: Dict = Depends(get
     from rotation_planner.field.spatial import geojson_to_shapely, calculate_geodesic_area_ha
     ensure_crop_polygons_table()
 
-    field = FieldRepository.get_field_by_id(req.field_id)
+    field = FieldRepository.get_field(req.field_id)
     if not field:
         raise HTTPException(status_code=404, detail=f"ほ場ID {req.field_id} が見つかりません")
     if field.get("user_id") != current_user["id"]:
@@ -3447,7 +3447,7 @@ def update_crop_polygon(
     p = CropPolygonRepository.get_by_id(polygon_id)
     if not p:
         raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
-    field = FieldRepository.get_field_by_id(p["field_id"])
+    field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを更新する権限がありません")
 
@@ -3481,7 +3481,7 @@ def delete_crop_polygon(polygon_id: int, current_user: Dict = Depends(get_curren
     p = CropPolygonRepository.get_by_id(polygon_id)
     if not p:
         raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
-    field = FieldRepository.get_field_by_id(p["field_id"])
+    field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを削除する権限がありません")
 

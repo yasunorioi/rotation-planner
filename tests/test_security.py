@@ -121,17 +121,23 @@ class TestCSVExportSecurity:
         """
         CSVエクスポートがuser_idを尊重すること
         """
-        # csv_exportモジュールがある場合のテスト
-        try:
-            import csv_export
+        from rotation_planner.common.export import export_fields_csv
 
-            # user_id=1のデータのみがエクスポートされることを確認
-            # （実際のエクスポート関数の仕様に依存）
-            if hasattr(csv_export, 'export_fields_csv'):
-                # テスト実装
-                pass
-        except ImportError:
-            pytest.skip("csv_exportモジュールが見つかりません")
+        # farmer（user_id=3）のエクスポート: 自分のほ場のみ
+        farmer_state = {
+            "user_id": 3,
+            "username": "farmer_demo",
+            "role": "farmer",
+            "org_id": 2,
+        }
+        filepath, msg = export_fields_csv(farmer_state)
+        # データがなくても関数が正常に動作すること
+        assert isinstance(msg, str)
+
+        # ログインなし: エラーを返すこと
+        filepath_none, msg_none = export_fields_csv({})
+        assert filepath_none is None
+        assert "エラー" in msg_none
 
 
 class TestJAStaffAccess:

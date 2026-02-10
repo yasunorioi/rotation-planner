@@ -319,17 +319,19 @@ class TestCropPolygonAPI:
         return TestClient(app)
 
     @pytest.fixture
-    def auth_headers(self, client):
-        """認証ヘッダー取得"""
-        # テストユーザーでトークン取得
-        resp = client.post("/api/auth/login", json={
-            "username": "testuser", "password": "hash"
-        })
-        if resp.status_code == 200:
-            token = resp.json().get("token")
-            return {"Authorization": f"Bearer {token}"}
-        # ログインAPI未実装 or パスワードハッシュの場合はスキップ
-        pytest.skip("認証APIが利用できないためスキップ")
+    def auth_headers(self):
+        """認証ヘッダー取得（JWTトークンを直接生成）"""
+        import jwt
+        from datetime import datetime, timedelta
+        secret = os.environ.get("JWT_SECRET", "test-secret-key-for-testing")
+        payload = {
+            "sub": "1",
+            "username": "testuser",
+            "role": "admin",
+            "exp": datetime.utcnow() + timedelta(hours=1)
+        }
+        token = jwt.encode(payload, secret, algorithm="HS256")
+        return {"Authorization": f"Bearer {token}"}
 
     def test_create_and_get(self, client, auth_headers):
         """POST→GET の基本フロー"""

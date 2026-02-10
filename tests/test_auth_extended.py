@@ -32,15 +32,15 @@ class TestAddUser:
         assert auth_result is True
 
     def test_AU_02_add_user_duplicate_username(self, test_db):
-        """AU-02: 既存ユーザー名でFalseを返す"""
+        """AU-02: 既存ユーザー名でValueErrorを送出"""
         # adminは初期ユーザー
-        result = auth.add_user(
-            username="admin",
-            password="newpassword",
-            role="admin",
-            org_id=1
-        )
-        assert result is False
+        with pytest.raises(ValueError, match="既に使用されています"):
+            auth.add_user(
+                username="admin",
+                password="newpassword",
+                role="admin",
+                org_id=1
+            )
 
 
 class TestUpdatePassword:

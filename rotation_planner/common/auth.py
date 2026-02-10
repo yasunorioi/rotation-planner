@@ -17,10 +17,13 @@
 """
 
 import hashlib
+import logging
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 
 from .db import get_db, row_to_dict, rows_to_list
+
+logger = logging.getLogger("rotation_planner.auth")
 
 
 # =============================================================================
@@ -128,16 +131,20 @@ def authenticate(username: str, password: str) -> bool:
         password: パスワード
 
     Returns:
-        認証成功ならTrue
+        認証成功ならTrue。DBエラー時はFalse（fail closed）
     """
     pw_hash = hash_password(password)
 
-    with get_db() as conn:
-        cursor = conn.execute(
-            "SELECT id FROM users WHERE username = ? AND password_hash = ? AND is_active = 1",
-            (username, pw_hash)
-        )
-        return cursor.fetchone() is not None
+    try:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT id FROM users WHERE username = ? AND password_hash = ? AND is_active = 1",
+                (username, pw_hash)
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.error("認証DB問い合わせエラー: %s", e, exc_info=True)
+        return False
 
 
 def get_user_info(username: str) -> Optional[Dict[str, Any]]:
@@ -307,6 +314,9 @@ def add_user(
 
     Returns:
         追加成功ならTrue
+
+    Raises:
+        ValueError: ユーザー名が既に存在する場合
     """
     with get_db() as conn:
         # 既存ユーザーチェック
@@ -315,7 +325,7 @@ def add_user(
             (username,)
         )
         if cursor.fetchone():
-            return False
+            raise ValueError(f"ユーザー名 '{username}' は既に使用されています")
 
         # 新規追加
         conn.execute(

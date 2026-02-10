@@ -87,14 +87,14 @@ def add_user(username: str, password: str, role: str, display_name: str) -> Tupl
         return "エラー: パスワードは4文字以上必要です", get_users_for_display()
 
     # auth モジュールの add_user を使用
-    success = auth_add_user(
-        username=username,
-        password=password,
-        role=role,
-        display_name=display_name or username
-    )
-
-    if not success:
+    try:
+        auth_add_user(
+            username=username,
+            password=password,
+            role=role,
+            display_name=display_name or username
+        )
+    except ValueError:
         return f"エラー: ユーザー名 '{username}' は既に存在します", get_users_for_display()
 
     return f"ユーザー追加完了: {username} ({ROLE_DISPLAY.get(role, role)})", get_users_for_display()

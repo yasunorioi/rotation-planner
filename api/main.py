@@ -22,6 +22,8 @@ import csv
 # 親ディレクトリをパスに追加（rotation_planner モジュールを使用するため）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import logging
+
 from rotation_planner.common import (
     authenticate,
     get_user_info,
@@ -47,6 +49,10 @@ from rotation_planner.common import (
     ensure_crop_tables,
     ensure_inventory_tables,
 )
+from rotation_planner.common.exceptions import DuplicateKeyError
+from api.error_handlers import register_exception_handlers, require_found
+
+logger = logging.getLogger("rotation_planner.api")
 
 # GPSマッチング機能
 from rotation_planner.field.gps_matcher import (
@@ -74,6 +80,9 @@ from api.inventory_api import router as inventory_router, create_inventory_route
 
 @asynccontextmanager
 async def lifespan(app):
+    # ロギング設定
+    from api.logging_config import setup_api_logging
+    setup_api_logging()
     # 起動時にテーブル初期化
     ensure_crop_tables()
     ensure_inventory_tables()
@@ -93,6 +102,9 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+# グローバル例外ハンドラ登録
+register_exception_handlers(app)
 
 # CORS設定（開発環境用）
 app.add_middleware(
@@ -485,9 +497,7 @@ def login(req: LoginRequest):
 
 @app.get("/api/auth/me", response_model=UserResponse)
 def get_me(current_user: Dict = Depends(get_current_user)):
-    user = get_user_info(current_user["username"])
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = require_found(get_user_info(current_user["username"]), "ユーザー")
     return UserResponse(
         id=user["id"],
         username=user["username"],
@@ -535,9 +545,7 @@ def update_user(username: str, user: UserUpdate, current_user: Dict = Depends(re
         update_password(username, user.password)
     if user.role:
         update_user_role(username, user.role)
-    updated = get_user_info(username)
-    if not updated:
-        raise HTTPException(status_code=404, detail="User not found")
+    updated = require_found(get_user_info(username), "ユーザー")
     return UserResponse(
         id=updated["id"],
         username=updated["username"],
@@ -992,9 +1000,7 @@ def create_field(field: FieldCreate, current_user: Dict = Depends(get_current_us
                 "coordinates_json": field.coordinates_json,
             }
         )
-        created = FieldRepository.get_field(field_id)
-        if not created:
-            raise HTTPException(status_code=500, detail="Failed to create field")
+        created = require_found(FieldRepository.get_field(field_id), "ほ場")
 
         # 初期作付情報が指定されている場合はcrop_historyに保存
         if field.crop_year and field.crop_name:
@@ -1003,17 +1009,18 @@ def create_field(field: FieldCreate, current_user: Dict = Depends(get_current_us
                 CropHistoryRepository.add_history(field_id, western_year, field.crop_name)
 
         return FieldResponse.from_db(created)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=f"ほ場コード '{field.field_code}' は既に使用されています")
+    except HTTPException:
+        raise
     except Exception as e:
-        if "UNIQUE constraint" in str(e):
-            raise HTTPException(status_code=400, detail=f"ほ場コード '{field.field_code}' は既に使用されています")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ほ場作成エラー: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="ほ場の作成に失敗しました")
 
 
 @app.get("/api/fields/{field_id}", response_model=FieldResponse)
 def get_field(field_id: int, current_user: Dict = Depends(get_current_user)):
-    field = FieldRepository.get_field(field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+    field = require_found(FieldRepository.get_field(field_id), "ほ場")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     return FieldResponse.from_db(field)
@@ -1021,9 +1028,7 @@ def get_field(field_id: int, current_user: Dict = Depends(get_current_user)):
 
 @app.put("/api/fields/{field_id}", response_model=FieldResponse)
 def update_field(field_id: int, field: FieldUpdate, current_user: Dict = Depends(get_current_user)):
-    existing = FieldRepository.get_field(field_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Field not found")
+    existing = require_found(FieldRepository.get_field(field_id), "ほ場")
     if existing["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     # 面積バリデーション
@@ -1040,9 +1045,7 @@ def update_field(field_id: int, field: FieldUpdate, current_user: Dict = Depends
 
 @app.delete("/api/fields/{field_id}", status_code=204)
 def delete_field(field_id: int, current_user: Dict = Depends(get_current_user)):
-    existing = FieldRepository.get_field(field_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Field not found")
+    existing = require_found(FieldRepository.get_field(field_id), "ほ場")
     if existing["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     FieldRepository.delete_field(field_id)
@@ -1119,11 +1122,13 @@ async def import_kml(
                     imported_fields.append(FieldResponse.from_db(created))
 
             except Exception as e:
-                error_msg = f"ほ場「{pf.get('name', f'#{i}')}」の登録に失敗: {str(e)}"
+                logger.warning("KMLインポート: ほ場登録失敗 %s - %s", pf.get('name', f'#{i}'), e)
+                error_msg = f"ほ場「{pf.get('name', f'#{i}')}」の登録に失敗しました"
                 errors.append(error_msg)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ファイル処理エラー: {str(e)}")
+        logger.error("KMLファイル処理エラー: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="ファイルの処理に失敗しました")
 
     return KmlImportResponse(imported_fields=imported_fields, errors=errors)
 
@@ -1274,9 +1279,7 @@ def match_field_by_gps(req: GpsMatchRequest, current_user: Dict = Depends(get_cu
 
 @app.get("/api/fields/{field_id}/history", response_model=List[CropHistoryResponse])
 def list_crop_history(field_id: int, current_user: Dict = Depends(get_current_user)):
-    field = FieldRepository.get_field(field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+    field = require_found(FieldRepository.get_field(field_id), "ほ場")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     history = CropHistoryRepository.get_history(field_id)
@@ -1289,9 +1292,7 @@ def get_field_current_crop(field_id: int, year: int = None, current_user: Dict =
     ほ場の当年作物を輪作計画から取得
     輪作計画がない場合は作付履歴から取得
     """
-    field = FieldRepository.get_field(field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+    field = require_found(FieldRepository.get_field(field_id), "ほ場")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1338,9 +1339,7 @@ def get_field_current_crop(field_id: int, year: int = None, current_user: Dict =
 
 @app.post("/api/fields/{field_id}/history", response_model=CropHistoryResponse, status_code=201)
 def add_crop_history(field_id: int, history: CropHistoryCreate, current_user: Dict = Depends(get_current_user)):
-    field = FieldRepository.get_field(field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+    field = require_found(FieldRepository.get_field(field_id), "ほ場")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     history_id = CropHistoryRepository.add_history(field_id, history.year, history.crop)
@@ -1349,12 +1348,8 @@ def add_crop_history(field_id: int, history: CropHistoryCreate, current_user: Di
 
 @app.delete("/api/history/{history_id}", status_code=204)
 def delete_crop_history(history_id: int, current_user: Dict = Depends(get_current_user)):
-    history = CropHistoryRepository.get_history_by_id(history_id)
-    if not history:
-        raise HTTPException(status_code=404, detail="History not found")
-    field = FieldRepository.get_field(history["field_id"])
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+    history = require_found(CropHistoryRepository.get_history_by_id(history_id), "作付履歴")
+    field = require_found(FieldRepository.get_field(history["field_id"]), "ほ場")
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     CropHistoryRepository.delete_history_by_id(history_id)
@@ -1381,17 +1376,13 @@ def create_plan(plan: PlanCreate, current_user: Dict = Depends(get_current_user)
             "details": plan.details
         }
     )
-    created = PlanRepository.get_plan(plan_id)
-    if not created:
-        raise HTTPException(status_code=500, detail="Failed to create plan")
+    created = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
     return PlanResponse(**created)
 
 
 @app.get("/api/plans/{plan_id}", response_model=PlanResponse)
 def get_plan(plan_id: int, current_user: Dict = Depends(get_current_user)):
-    plan = PlanRepository.get_plan(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
+    plan = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     return PlanResponse(**plan)
@@ -1400,9 +1391,7 @@ def get_plan(plan_id: int, current_user: Dict = Depends(get_current_user)):
 @app.put("/api/plans/{plan_id}", response_model=PlanResponse)
 def update_plan(plan_id: int, plan_update: PlanUpdate, current_user: Dict = Depends(get_current_user)):
     """輪作計画を更新（部分更新対応）"""
-    plan = PlanRepository.get_plan(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
+    plan = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1426,9 +1415,7 @@ def update_plan(plan_id: int, plan_update: PlanUpdate, current_user: Dict = Depe
 
 @app.delete("/api/plans/{plan_id}", status_code=204)
 def delete_plan(plan_id: int, current_user: Dict = Depends(get_current_user)):
-    plan = PlanRepository.get_plan(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
+    plan = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     PlanRepository.delete_plan(plan_id)
@@ -1539,10 +1526,11 @@ def add_custom_crop(req: UserCropAddCustom, current_user: Dict = Depends(get_cur
             req.custom_name.strip()
         )
         return {"status": "ok", "id": user_crop_id}
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="この作物は既に登録されています")
     except Exception as e:
-        if "UNIQUE constraint" in str(e):
-            raise HTTPException(status_code=400, detail="この作物は既に登録されています")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("カスタム作物追加エラー: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="作物の追加に失敗しました")
 
 
 @app.delete("/api/user-crops/{user_crop_id}", status_code=204)
@@ -1625,9 +1613,7 @@ def create_pesticide_master(master: PesticideMasterCreate, current_user: Dict = 
 @app.put("/api/pesticide-masters/{master_id}", response_model=PesticideMasterResponse)
 def update_pesticide_master(master_id: int, master: PesticideMasterCreate, current_user: Dict = Depends(require_admin)):
     PesticideMasterRepository.update(master_id, master.model_dump())
-    updated = PesticideMasterRepository.get(master_id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Pesticide master not found")
+    updated = require_found(PesticideMasterRepository.get(master_id), "農薬マスタ")
     return PesticideMasterResponse(**updated)
 
 
@@ -1702,9 +1688,7 @@ def update_pesticide_order(
     current_user: Dict = Depends(get_current_user)
 ):
     """農薬発注を更新（部分更新対応）"""
-    order = PesticideOrderRepository.get_order(order_id)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    order = require_found(PesticideOrderRepository.get_order(order_id), "農薬発注")
     if order["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1726,9 +1710,7 @@ def update_pesticide_order(
 
 @app.delete("/api/pesticide-orders/{order_id}", status_code=204)
 def delete_pesticide_order(order_id: int, current_user: Dict = Depends(get_current_user)):
-    order = PesticideOrderRepository.get_order(order_id)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    order = require_found(PesticideOrderRepository.get_order(order_id), "農薬発注")
     if order["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     PesticideOrderRepository.delete_order(order_id)
@@ -1778,9 +1760,7 @@ def calculate_pesticide_from_plan(
     農薬マスタを参照して必要量を計算する。
     """
     # 計画を取得
-    plan = PlanRepository.get_plan(req.plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="計画が見つかりません")
+    plan = require_found(PlanRepository.get_plan(req.plan_id), "輪作計画")
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="アクセス権限がありません")
 
@@ -2039,9 +2019,7 @@ def create_pesticide_record(record: PesticideRecordCreate, current_user: Dict = 
 
 @app.get("/api/pesticide-records/{record_id}", response_model=PesticideRecordResponse)
 def get_pesticide_record(record_id: int, current_user: Dict = Depends(get_current_user)):
-    record = PesticideRecordRepository.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    record = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if record["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     return PesticideRecordResponse(**record)
@@ -2049,9 +2027,7 @@ def get_pesticide_record(record_id: int, current_user: Dict = Depends(get_curren
 
 @app.put("/api/pesticide-records/{record_id}", response_model=PesticideRecordResponse)
 def update_pesticide_record(record_id: int, record: PesticideRecordCreate, current_user: Dict = Depends(get_current_user)):
-    existing = PesticideRecordRepository.get_record(record_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Record not found")
+    existing = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if existing["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     PesticideRecordRepository.update_record(record_id, record.model_dump())
@@ -2061,9 +2037,7 @@ def update_pesticide_record(record_id: int, record: PesticideRecordCreate, curre
 
 @app.delete("/api/pesticide-records/{record_id}", status_code=204)
 def delete_pesticide_record(record_id: int, current_user: Dict = Depends(get_current_user)):
-    existing = PesticideRecordRepository.get_record(record_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Record not found")
+    existing = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if existing["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     PesticideRecordRepository.delete_record(record_id)
@@ -2293,9 +2267,7 @@ class RecordImageResponse(BaseModel):
 @app.post("/api/pesticide-records/{record_id}/images", response_model=RecordImageResponse, status_code=201)
 async def upload_record_image(record_id: int, image: UploadFile = File(...), current_user: Dict = Depends(get_current_user)):
     """防除記録に画像を添付"""
-    record = PesticideRecordRepository.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    record = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if record["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     if not (image.content_type or "").startswith("image/"):
@@ -2319,9 +2291,7 @@ async def upload_record_image(record_id: int, image: UploadFile = File(...), cur
 @app.get("/api/pesticide-records/{record_id}/images", response_model=List[RecordImageResponse])
 def list_record_images(record_id: int, current_user: Dict = Depends(get_current_user)):
     """防除記録の画像一覧"""
-    record = PesticideRecordRepository.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    record = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if record["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     import json
@@ -2335,9 +2305,7 @@ def list_record_images(record_id: int, current_user: Dict = Depends(get_current_
 @app.get("/api/pesticide-records/{record_id}/images/{image_id}")
 def get_record_image(record_id: int, image_id: str, current_user: Dict = Depends(get_current_user)):
     """防除記録の画像取得"""
-    record = PesticideRecordRepository.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    record = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if record["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     import json
@@ -2357,9 +2325,7 @@ def get_record_image(record_id: int, image_id: str, current_user: Dict = Depends
 @app.delete("/api/pesticide-records/{record_id}/images/{image_id}", status_code=204)
 def delete_record_image(record_id: int, image_id: str, current_user: Dict = Depends(get_current_user)):
     """防除記録の画像削除"""
-    record = PesticideRecordRepository.get_record(record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    record = require_found(PesticideRecordRepository.get_record(record_id), "防除記録")
     if record["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     import json
@@ -2505,9 +2471,7 @@ def export_fields_csv(current_user: Dict = Depends(get_current_user)):
 @app.get("/api/export/plans/{plan_id}/csv")
 def export_plan_csv(plan_id: int, current_user: Dict = Depends(get_current_user)):
     """輪作計画CSVエクスポート"""
-    plan = PlanRepository.get_plan(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
+    plan = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -2614,9 +2578,7 @@ def apply_plan_to_history(
     計画の各ほ場×年の作物を作付履歴テーブルに一括登録する。
     既存の履歴がある場合は上書きされる。
     """
-    plan = PlanRepository.get_plan(plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail="計画が見つかりません")
+    plan = require_found(PlanRepository.get_plan(plan_id), "輪作計画")
 
     # 権限チェック
     if plan["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
@@ -2784,11 +2746,12 @@ def import_rotation_csv(req: RotationImportRequest, current_user: Dict = Depends
             details=details
         )
     except Exception as e:
+        logger.error("輪作計画の保存に失敗: %s", e, exc_info=True)
         return RotationImportResponse(
             success=False,
             import_count=0,
             error_count=1,
-            errors=[f"計画の保存に失敗しました: {str(e)}"],
+            errors=["計画の保存に失敗しました"],
             warnings=warnings
         )
 
@@ -3033,7 +2996,8 @@ def optimize_rotation(req: RotationOptimizeRequest, current_user: Dict = Depends
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"最適化エラー: {str(e)}")
+        logger.error("最適化エラー: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="最適化の実行に失敗しました")
 
 
 # =============================================================================
@@ -3213,9 +3177,7 @@ def get_paddy_polygon(polygon_id: int, current_user: Dict = Depends(get_current_
     """水田ポリゴン詳細"""
     from rotation_planner.common.db_access import PaddyPolygonRepository, ensure_paddy_polygons_table
     ensure_paddy_polygons_table()
-    p = PaddyPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="水田ポリゴンが見つかりません")
+    p = require_found(PaddyPolygonRepository.get_by_id(polygon_id), "水田ポリゴン")
     return _polygon_to_response(p)
 
 
@@ -3228,9 +3190,7 @@ def create_paddy_polygon(req: PaddyPolygonCreate, current_user: Dict = Depends(g
     ensure_paddy_polygons_table()
 
     # ほ場の存在・所有確認
-    field = FieldRepository.get_field(req.field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail=f"ほ場ID {req.field_id} が見つかりません")
+    field = require_found(FieldRepository.get_field(req.field_id), "ほ場")
     if field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このほ場にアクセスする権限がありません")
 
@@ -3239,7 +3199,7 @@ def create_paddy_polygon(req: PaddyPolygonCreate, current_user: Dict = Depends(g
     try:
         polygon = geojson_to_shapely(geometry_str)
         area_ha = calculate_geodesic_area_ha(polygon)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError) as e:
         raise HTTPException(status_code=400, detail=f"ジオメトリの解析に失敗: {e}")
 
     polygon_id = PaddyPolygonRepository.create(
@@ -3267,9 +3227,7 @@ def update_paddy_polygon(
     from rotation_planner.field.spatial import geojson_to_shapely, calculate_geodesic_area_ha
     ensure_paddy_polygons_table()
 
-    p = PaddyPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="水田ポリゴンが見つかりません")
+    p = require_found(PaddyPolygonRepository.get_by_id(polygon_id), "水田ポリゴン")
     field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを更新する権限がありません")
@@ -3281,7 +3239,7 @@ def update_paddy_polygon(
             polygon = geojson_to_shapely(geometry_str)
             kwargs['geometry'] = geometry_str
             kwargs['area_ha'] = calculate_geodesic_area_ha(polygon)
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
             raise HTTPException(status_code=400, detail=f"ジオメトリの解析に失敗: {e}")
     if req.is_converted is not None:
         kwargs['is_converted'] = req.is_converted
@@ -3306,9 +3264,7 @@ def delete_paddy_polygon(polygon_id: int, current_user: Dict = Depends(get_curre
     from rotation_planner.common.db_access import PaddyPolygonRepository, FieldRepository, ensure_paddy_polygons_table
     ensure_paddy_polygons_table()
 
-    p = PaddyPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="水田ポリゴンが見つかりません")
+    p = require_found(PaddyPolygonRepository.get_by_id(polygon_id), "水田ポリゴン")
     field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを削除する権限がありません")
@@ -3393,9 +3349,7 @@ def get_crop_polygon(polygon_id: int, current_user: Dict = Depends(get_current_u
     from rotation_planner.common.db_access import CropPolygonRepository, FieldRepository, ensure_crop_polygons_table
     ensure_crop_polygons_table()
 
-    p = CropPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
+    p = require_found(CropPolygonRepository.get_by_id(polygon_id), "作付けポリゴン")
     field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンにアクセスする権限がありません")
@@ -3410,9 +3364,7 @@ def create_crop_polygon(req: CropPolygonCreate, current_user: Dict = Depends(get
     from rotation_planner.field.spatial import geojson_to_shapely, calculate_geodesic_area_ha
     ensure_crop_polygons_table()
 
-    field = FieldRepository.get_field(req.field_id)
-    if not field:
-        raise HTTPException(status_code=404, detail=f"ほ場ID {req.field_id} が見つかりません")
+    field = require_found(FieldRepository.get_field(req.field_id), "ほ場")
     if field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このほ場にアクセスする権限がありません")
 
@@ -3420,7 +3372,7 @@ def create_crop_polygon(req: CropPolygonCreate, current_user: Dict = Depends(get
     try:
         polygon = geojson_to_shapely(geometry_str)
         area_ha = calculate_geodesic_area_ha(polygon)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError) as e:
         raise HTTPException(status_code=400, detail=f"ジオメトリの解析に失敗: {e}")
 
     polygon_id = CropPolygonRepository.create(
@@ -3447,9 +3399,7 @@ def update_crop_polygon(
     from rotation_planner.field.spatial import geojson_to_shapely, calculate_geodesic_area_ha
     ensure_crop_polygons_table()
 
-    p = CropPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
+    p = require_found(CropPolygonRepository.get_by_id(polygon_id), "作付けポリゴン")
     field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを更新する権限がありません")
@@ -3464,7 +3414,7 @@ def update_crop_polygon(
         try:
             polygon = geojson_to_shapely(geometry_str)
             kwargs['area_ha'] = calculate_geodesic_area_ha(polygon)
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
             raise HTTPException(status_code=400, detail=f"ジオメトリの解析に失敗: {e}")
         kwargs['geometry'] = geometry_str
     if req.notes is not None:
@@ -3481,9 +3431,7 @@ def delete_crop_polygon(polygon_id: int, current_user: Dict = Depends(get_curren
     from rotation_planner.common.db_access import CropPolygonRepository, FieldRepository, ensure_crop_polygons_table
     ensure_crop_polygons_table()
 
-    p = CropPolygonRepository.get_by_id(polygon_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
+    p = require_found(CropPolygonRepository.get_by_id(polygon_id), "作付けポリゴン")
     field = FieldRepository.get_field(p["field_id"])
     if not field or field.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="このポリゴンを削除する権限がありません")
@@ -3592,9 +3540,7 @@ def get_land_category_for_crop(
     ensure_paddy_polygons_table()
     ensure_crop_polygons_table()
 
-    crop_poly = CropPolygonRepository.get_by_id(crop_polygon_id)
-    if not crop_poly:
-        raise HTTPException(status_code=404, detail="作付けポリゴンが見つかりません")
+    crop_poly = require_found(CropPolygonRepository.get_by_id(crop_polygon_id), "作付けポリゴン")
 
     from rotation_planner.common.db_access import FieldRepository
     field_data = FieldRepository.get_field(crop_poly['field_id'])

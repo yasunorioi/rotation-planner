@@ -486,15 +486,26 @@ class CropHistoryRepository:
     @staticmethod
     def bulk_add_history(field_id: int, history: Dict[str, str]) -> int:
         """作付履歴を一括追加（年: 作物の辞書）"""
-        count = 0
-        with get_db() as conn:
-            for year, crop in history.items():
-                conn.execute("""
-                    INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
-                    VALUES (?, ?, ?, 0)
-                """, (field_id, year, crop))
-                count += 1
-        return count
+        try:
+            count = 0
+            with get_db() as conn:
+                for year, crop in history.items():
+                    conn.execute("""
+                        INSERT OR REPLACE INTO crop_history (field_id, year, crop, is_inferred)
+                        VALUES (?, ?, ?, 0)
+                    """, (field_id, year, crop))
+                    count += 1
+            logger.info(f"作成成功: 作付履歴一括追加 field_id={field_id} {count}件")
+            return count
+        except sqlite3.IntegrityError as e:
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg:
+                raise ForeignKeyViolationError(f"参照先が存在しません: {e}")
+            else:
+                raise DatabaseError(f"データベースエラー: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"操作失敗: 作付履歴一括追加 field_id={field_id} - {e}")
+            raise DatabaseError(f"データベースエラーが発生しました: {e}")
 
 
 # =============================================================================

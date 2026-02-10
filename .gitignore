@@ -15,6 +15,7 @@ data/*.db
 
 # ログ
 *.log
+logs/
 nohup.out
 
 # IDE

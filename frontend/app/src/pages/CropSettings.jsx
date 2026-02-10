@@ -336,6 +336,9 @@ export default function CropSettings() {
           <div className="crop-grid">
             {otherCrops.map((crop) => {
               const isSelected = selectedCropIds.includes(crop.id);
+              // ユーザーが登録済みならユーザー側の表示名（子）を使う
+              const uc = userCrops.find((u) => u.parent_crop_id === crop.id && !u.custom_name);
+              const displayName = uc ? uc.name : crop.name;
               return (
                 <div key={crop.id} className={`crop-card ${isSelected ? 'selected' : ''}`}>
                   <label className="crop-checkbox">
@@ -344,7 +347,7 @@ export default function CropSettings() {
                       checked={isSelected}
                       onChange={() => handleCropToggle(crop.id)}
                     />
-                    <span className="crop-name">{crop.name}</span>
+                    <span className="crop-name">{displayName}</span>
                   </label>
                 </div>
               );

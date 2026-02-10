@@ -4,7 +4,7 @@ rotation_planner.famic.importer - FAMICデータインポーター
 FAMICの農薬登録情報XLSファイルをSQLiteにインポート。
 
 データソース:
-- https://www.acis.famic.go.jp/ddata/index.htm
+- https://www.acis.famic.go.jp/ddownload/index.htm
 
 ファイル形式:
 - 登録基本部.xls: 農薬の基本情報（名称、有効成分等）
@@ -21,6 +21,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -452,7 +453,7 @@ def download_famic_file(file_key: str, timeout: int = 60) -> str:
         raise ValueError(f"不正なfile_key: {file_key}")
 
     zip_name = FAMIC_FILES[file_key]
-    url = f"{FAMIC_BASE_URL}/{zip_name}"
+    url = f"{FAMIC_BASE_URL}/{quote(zip_name)}"
 
     # キャッシュディレクトリ作成
     FAMIC_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -464,13 +465,14 @@ def download_famic_file(file_key: str, timeout: int = 60) -> str:
     # ZIPを解凍
     with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
         # XLSファイルを探す
-        xls_files = [n for n in zf.namelist() if n.endswith('.xls')]
+        xls_files = [n for n in zf.namelist() if n.lower().endswith('.xls')]
         if not xls_files:
             raise ValueError(f"ZIPにXLSファイルが含まれていません: {zip_name}")
 
-        # 最初のXLSを解凍
+        # 最初のXLSを解凍（日本語ファイル名を安全なファイル名に変換）
         xls_name = xls_files[0]
-        xls_path = FAMIC_CACHE_DIR / xls_name
+        safe_name = f"{file_key}.xls"
+        xls_path = FAMIC_CACHE_DIR / safe_name
 
         with zf.open(xls_name) as src:
             with open(xls_path, 'wb') as dst:

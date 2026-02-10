@@ -218,7 +218,7 @@ python3 portal.py
 
 農薬検査所（FAMIC）が公開する農薬登録情報XLSファイルをDBに一括取込する機能。
 
-- **データソース**: https://www.acis.famic.go.jp/ddata/index.htm
+- **データソース**: https://www.acis.famic.go.jp/ddownload/index.htm
 - **依存ライブラリ**: `xlrd`（XLS読み込み）
 
 | インポート関数 | 対象ファイル | 取込先テーブル |
@@ -655,5 +655,5 @@ MIT License
 ## データ出典
 
 - 筆ポリゴン: 農林水産省「筆ポリゴンデータ」（https://open.fude.maff.go.jp/）
-- 農薬登録情報: 農薬検査所（FAMIC）（https://www.acis.famic.go.jp/ddata/index.htm）
+- 農薬登録情報: 農薬検査所（FAMIC）（https://www.acis.famic.go.jp/ddownload/index.htm）
 - 地図: OpenStreetMap contributors

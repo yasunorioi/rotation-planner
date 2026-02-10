@@ -167,18 +167,16 @@ export default function SystemInfo() {
     }
   };
 
-  const handleAcceptFamicTerms = async () => {
-    const confirmed = window.confirm(
-      'FAMICの利用規約に同意しますか？\n\n' +
-      '農林水産消費安全技術センター（FAMIC）の農薬登録情報を利用するには、' +
-      'FAMICの利用規約への同意が必要です。\n\n' +
-      '利用規約: https://www.acis.famic.go.jp/ddata/index.htm'
-    );
-    if (!confirmed) return;
+  // FAMIC利用規約同意
+  const [showFamicTermsModal, setShowFamicTermsModal] = useState(false);
+  const [famicTermsChecked, setFamicTermsChecked] = useState(false);
 
+  const handleAcceptFamicTerms = async () => {
     try {
       await adminApi.acceptFamicTerms();
       setFamicMessage({ type: 'success', text: 'FAMIC利用規約に同意しました' });
+      setShowFamicTermsModal(false);
+      setFamicTermsChecked(false);
       loadFamicStatus();
     } catch (err) {
       setFamicMessage({ type: 'error', text: '同意処理に失敗しました' });
@@ -431,7 +429,7 @@ export default function SystemInfo() {
           <div className="section">
             <h2>農薬登録情報（FAMIC）</h2>
             <p style={{ color: '#666', marginBottom: '15px' }}>
-              <a href="https://www.acis.famic.go.jp/ddata/index.htm" target="_blank" rel="noopener noreferrer">
+              <a href="https://www.acis.famic.go.jp/ddownload/index.htm" target="_blank" rel="noopener noreferrer">
                 農林水産消費安全技術センター（FAMIC）
               </a>
               の農薬登録情報をダウンロードしてDBに取り込みます。
@@ -450,24 +448,99 @@ export default function SystemInfo() {
                 <p style={{ marginBottom: '15px' }}>
                   FAMICの農薬登録情報を利用するには、利用規約への同意が必要です。
                 </p>
-                <p style={{ marginBottom: '15px', fontSize: '0.9em', color: '#666' }}>
-                  利用規約は以下のリンクからご確認ください：<br />
-                  <a
-                    href="https://www.acis.famic.go.jp/ddata/index.htm"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: '#1976d2' }}
-                  >
-                    https://www.acis.famic.go.jp/ddata/index.htm
-                  </a>
-                </p>
                 <button
-                  onClick={handleAcceptFamicTerms}
+                  onClick={() => { setShowFamicTermsModal(true); setFamicTermsChecked(false); }}
                   className="btn-primary"
                   style={{ background: '#ff9800' }}
                 >
-                  利用規約に同意する
+                  利用規約を確認して同意する
                 </button>
+              </div>
+            )}
+
+            {/* FAMIC利用規約モーダル */}
+            {showFamicTermsModal && (
+              <div className="modal-overlay">
+                <div className="modal modal-lg">
+                  <h2>FAMIC 農薬登録情報 利用規約</h2>
+                  <div style={{
+                    background: '#f8f9fa',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    padding: '16px',
+                    marginBottom: '16px',
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    fontSize: '0.9em',
+                    lineHeight: '1.7',
+                  }}>
+                    <p>
+                      本システムは、農林水産消費安全技術センター（FAMIC）が提供する
+                      農薬登録情報提供データをダウンロードして利用します。
+                    </p>
+                    <p style={{ marginTop: '12px' }}>
+                      データの利用にあたっては、FAMICが定める利用規約に従う必要があります。
+                      以下のリンクから利用規約の全文をご確認ください。
+                    </p>
+                    <p style={{ marginTop: '16px', textAlign: 'center' }}>
+                      <a
+                        href="https://www.acis.famic.go.jp/ddownload/index.htm"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: '#1976d2',
+                          fontSize: '1.1em',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        FAMIC 農薬登録情報提供ページ（利用規約）
+                      </a>
+                    </p>
+                    <ul style={{ marginTop: '16px', paddingLeft: '20px' }}>
+                      <li>データは農薬の安全使用のための参考情報です</li>
+                      <li>データの二次配布・商用利用にはFAMICの規約が適用されます</li>
+                      <li>最新情報はFAMICの公式サイトで確認してください</li>
+                    </ul>
+                  </div>
+
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    padding: '12px',
+                    background: famicTermsChecked ? '#e8f5e9' : '#fff',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    marginBottom: '16px',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={famicTermsChecked}
+                      onChange={(e) => setFamicTermsChecked(e.target.checked)}
+                      style={{ width: '18px', height: '18px' }}
+                    />
+                    <span>上記リンクのFAMIC利用規約を確認し、同意します</span>
+                  </label>
+
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      onClick={() => { setShowFamicTermsModal(false); setFamicTermsChecked(false); }}
+                      className="btn-secondary"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAcceptFamicTerms}
+                      className="btn-primary"
+                      disabled={!famicTermsChecked}
+                    >
+                      同意する
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

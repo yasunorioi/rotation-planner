@@ -10,6 +10,7 @@ import { useFieldStore } from '../store/fieldStore';
 import { fieldApi, cropApi } from '../lib/api';
 import { Spinner, TableSkeleton } from '../components/Loading';
 import { EmptyState } from '../components/ErrorMessage';
+import FieldMiniMap from '../components/FieldMiniMap';
 
 // 認証付きファイルダウンロード
 const downloadWithAuth = async (url, filename) => {
@@ -51,7 +52,7 @@ export default function Fields() {
   const [selectedFieldId, setSelectedFieldId] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyForm, setHistoryForm] = useState({ year: new Date().getFullYear(), crop: '' });
+
 
   // 年度別表示関連
   const currentYear = new Date().getFullYear();
@@ -240,18 +241,6 @@ export default function Fields() {
     }
   };
 
-  const handleAddHistory = async (e) => {
-    e.preventDefault();
-    try {
-      await fieldApi.addHistory(selectedFieldId, historyForm.year, historyForm.crop);
-      const data = await fieldApi.getHistory(selectedFieldId);
-      setHistory(data);
-      setHistoryForm({ year: new Date().getFullYear(), crop: '' });
-    } catch (err) {
-      alert('追加に失敗しました');
-    }
-  };
-
   // 一括登録用（4年分）
   const currentFiscalYear = new Date().getMonth() < 3 ? new Date().getFullYear() - 1 : new Date().getFullYear();
   const bulkHistoryYears = [currentFiscalYear - 3, currentFiscalYear - 2, currentFiscalYear - 1, currentFiscalYear];
@@ -296,8 +285,6 @@ export default function Fields() {
     const field = fields.find((f) => f.id === fieldId);
     return field ? (field.field_name || field.field_code) : '';
   };
-
-  const years = Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i);
 
   // ========== 年度別作物編集 ==========
   const handleCellClick = (field, year) => {
@@ -446,6 +433,20 @@ export default function Fields() {
           <div className="modal modal-lg">
             <h2>📅 作付履歴 - {getFieldName(selectedFieldId)}</h2>
 
+            {/* ほ場ミニ地図 */}
+            {(() => {
+              const field = fields.find((f) => f.id === selectedFieldId);
+              if (!field?.coordinates_json) return null;
+              let coords;
+              try {
+                coords = typeof field.coordinates_json === 'string'
+                  ? JSON.parse(field.coordinates_json)
+                  : field.coordinates_json;
+              } catch { return null; }
+              if (!coords || coords.length < 3) return null;
+              return <FieldMiniMap coordinates={coords} height="300px" />;
+            })()}
+
             {/* 一括登録テーブル（4年分） */}
             <div style={{ marginBottom: '16px' }}>
               <h3 style={{ fontSize: '1em', marginBottom: '8px' }}>一括登録</h3>
@@ -483,50 +484,10 @@ export default function Fields() {
               </button>
             </div>
 
-            {/* 1件追加フォーム */}
-            <details style={{ marginBottom: '12px' }}>
-              <summary style={{ cursor: 'pointer', color: '#666', fontSize: '0.9em' }}>
-                他の年度を個別追加
-              </summary>
-              <form onSubmit={handleAddHistory} className="history-form" style={{ marginTop: '8px' }}>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>年</label>
-                    <select
-                      value={historyForm.year}
-                      onChange={(e) => setHistoryForm({ ...historyForm, year: parseInt(e.target.value) })}
-                    >
-                      {years.map((y) => (
-                        <option key={y} value={y}>{y}年</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>作物</label>
-                    <select
-                      value={historyForm.crop}
-                      onChange={(e) => setHistoryForm({ ...historyForm, crop: e.target.value })}
-                      required
-                    >
-                      <option value="">選択してください</option>
-                      {userCrops.map((c) => (
-                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
-                          {c.custom_name || c.name || c.crop_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button type="submit" className="btn-primary">
-                    追加
-                  </button>
-                </div>
-              </form>
-            </details>
-
             {historyLoading ? (
               <Spinner text="履歴を読み込み中..." size="sm" />
             ) : history.length === 0 ? (
-              <EmptyState message="作付履歴がありません" icon="📅" />
+              <p style={{ color: '#888', textAlign: 'center', padding: '12px 0' }}>作付履歴がありません</p>
             ) : (
               <table className="data-table">
                 <thead>

@@ -158,6 +158,10 @@ export const fieldApi = {
     });
     return res.data;
   },
+  getDistricts: async () => {
+    const res = await api.get('/api/fields/districts');
+    return res.data.districts;
+  },
 };
 
 // =============================================================================

@@ -43,7 +43,7 @@ export default function Fields() {
     beet_forbidden: false,
   });
 
-  // ほ場選択（農薬発注用）
+  // ほ場選択（一括削除用）
   const [selectedFieldIds, setSelectedFieldIds] = useState(new Set());
 
   // 作付履歴関連
@@ -162,10 +162,10 @@ export default function Fields() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const data = {
-      ...formData,
-      area_ha: parseFloat(formData.area_ha),
-    };
+    const { area_ha, ...rest } = formData;
+    const data = editingId
+      ? rest  // 編集時は面積を送らない（ポリゴンから自動算出のため）
+      : { ...formData, area_ha: parseFloat(area_ha) };
 
     try {
       if (editingId) {
@@ -189,36 +189,38 @@ export default function Fields() {
     }
   };
 
-  // ほ場選択（チェックボックス）
   const handleFieldSelect = (fieldId) => {
-    setSelectedFieldIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(fieldId)) {
-        newSet.delete(fieldId);
-      } else {
-        newSet.add(fieldId);
-      }
-      return newSet;
+    setSelectedFieldIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fieldId)) next.delete(fieldId);
+      else next.add(fieldId);
+      return next;
     });
   };
 
-  // 全選択/解除
   const handleSelectAll = () => {
     if (selectedFieldIds.size === fields.length) {
       setSelectedFieldIds(new Set());
     } else {
-      setSelectedFieldIds(new Set(fields.map(f => f.id)));
+      setSelectedFieldIds(new Set(fields.map((f) => f.id)));
     }
   };
 
-  // 農薬発注画面へ遷移
-  const handleGoToPesticideOrders = () => {
-    if (selectedFieldIds.size === 0) {
-      alert('ほ場を選択してください');
-      return;
+  const handleBulkDelete = async () => {
+    if (selectedFieldIds.size === 0) return;
+    if (!confirm(`選択した${selectedFieldIds.size}件のほ場を削除しますか？`)) return;
+    let ok = 0;
+    let ng = 0;
+    for (const id of selectedFieldIds) {
+      try {
+        await deleteField(id);
+        ok++;
+      } catch {
+        ng++;
+      }
     }
-    const ids = Array.from(selectedFieldIds).join(',');
-    navigate(`/pesticide-orders?field_ids=${ids}`);
+    setSelectedFieldIds(new Set());
+    if (ng > 0) alert(`${ok}件削除、${ng}件失敗`);
   };
 
   // 作付履歴関連
@@ -229,8 +231,10 @@ export default function Fields() {
     try {
       const data = await fieldApi.getHistory(fieldId);
       setHistory(data);
+      initBulkHistory(data);
     } catch (err) {
       console.error('Failed to load history:', err);
+      initBulkHistory([]);
     } finally {
       setHistoryLoading(false);
     }
@@ -246,6 +250,40 @@ export default function Fields() {
     } catch (err) {
       alert('追加に失敗しました');
     }
+  };
+
+  // 一括登録用（4年分）
+  const currentFiscalYear = new Date().getMonth() < 3 ? new Date().getFullYear() - 1 : new Date().getFullYear();
+  const bulkHistoryYears = [currentFiscalYear - 3, currentFiscalYear - 2, currentFiscalYear - 1, currentFiscalYear];
+  const [bulkHistory, setBulkHistory] = useState({});
+
+  const initBulkHistory = (existingHistory) => {
+    const map = {};
+    bulkHistoryYears.forEach((y) => {
+      const existing = existingHistory.find((h) => h.year === y);
+      map[y] = existing ? existing.crop : '';
+    });
+    setBulkHistory(map);
+  };
+
+  const handleBulkHistorySubmit = async () => {
+    const entries = Object.entries(bulkHistory).filter(([, crop]) => crop);
+    if (entries.length === 0) {
+      alert('作物を1件以上入力してください');
+      return;
+    }
+    let ok = 0;
+    for (const [year, crop] of entries) {
+      try {
+        await fieldApi.addHistory(selectedFieldId, parseInt(year), crop);
+        ok++;
+      } catch {
+        // 既存年は上書きされる前提（APIの仕様による）
+      }
+    }
+    const data = await fieldApi.getHistory(selectedFieldId);
+    setHistory(data);
+    alert(`${ok}件登録しました`);
   };
 
   const closeHistoryModal = () => {
@@ -320,8 +358,8 @@ export default function Fields() {
             + ほ場登録
           </button>
           {selectedFieldIds.size > 0 && (
-            <button onClick={handleGoToPesticideOrders} className="btn-primary">
-              💊 発注画面へ ({selectedFieldIds.size})
+            <button onClick={handleBulkDelete} className="btn-danger">
+              🗑️ {selectedFieldIds.size}件削除
             </button>
           )}
         </div>
@@ -370,15 +408,14 @@ export default function Fields() {
                 />
               </div>
               <div className="form-group">
-                <label>面積 (ha) *</label>
+                <label>面積 (ha)</label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={formData.area_ha}
-                  onChange={(e) => setFormData({ ...formData, area_ha: e.target.value })}
-                  required
+                  type="text"
+                  value={`${parseFloat(formData.area_ha || 0).toFixed(4)} ha`}
+                  disabled
+                  style={{ background: '#f0f0f0', color: '#666' }}
                 />
+                <small style={{ color: '#888' }}>ポリゴンから自動算出（変更はほ場登録で再描画）</small>
               </div>
               <div className="form-group checkbox">
                 <label>
@@ -409,34 +446,82 @@ export default function Fields() {
           <div className="modal modal-lg">
             <h2>📅 作付履歴 - {getFieldName(selectedFieldId)}</h2>
 
-            <form onSubmit={handleAddHistory} className="history-form">
-              <div className="form-row">
-                <div className="form-group">
-                  <label>年</label>
-                  <select
-                    value={historyForm.year}
-                    onChange={(e) => setHistoryForm({ ...historyForm, year: parseInt(e.target.value) })}
-                  >
-                    {years.map((y) => (
-                      <option key={y} value={y}>{y}年</option>
+            {/* 一括登録テーブル（4年分） */}
+            <div style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1em', marginBottom: '8px' }}>一括登録</h3>
+              <table className="data-table" style={{ fontSize: '0.9em' }}>
+                <thead>
+                  <tr>
+                    {bulkHistoryYears.map((y) => (
+                      <th key={y}>{y}年</th>
                     ))}
-                  </select>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {bulkHistoryYears.map((y) => (
+                      <td key={y}>
+                        <select
+                          value={bulkHistory[y] || ''}
+                          onChange={(e) => setBulkHistory((prev) => ({ ...prev, [y]: e.target.value }))}
+                          style={{ width: '100%', padding: '4px' }}
+                        >
+                          <option value="">--</option>
+                          {userCrops.map((c) => (
+                            <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                              {c.custom_name || c.name || c.crop_name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+              <button onClick={handleBulkHistorySubmit} className="btn-primary" style={{ marginTop: '8px' }}>
+                一括登録
+              </button>
+            </div>
+
+            {/* 1件追加フォーム */}
+            <details style={{ marginBottom: '12px' }}>
+              <summary style={{ cursor: 'pointer', color: '#666', fontSize: '0.9em' }}>
+                他の年度を個別追加
+              </summary>
+              <form onSubmit={handleAddHistory} className="history-form" style={{ marginTop: '8px' }}>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>年</label>
+                    <select
+                      value={historyForm.year}
+                      onChange={(e) => setHistoryForm({ ...historyForm, year: parseInt(e.target.value) })}
+                    >
+                      {years.map((y) => (
+                        <option key={y} value={y}>{y}年</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>作物</label>
+                    <select
+                      value={historyForm.crop}
+                      onChange={(e) => setHistoryForm({ ...historyForm, crop: e.target.value })}
+                      required
+                    >
+                      <option value="">選択してください</option>
+                      {userCrops.map((c) => (
+                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                          {c.custom_name || c.name || c.crop_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    追加
+                  </button>
                 </div>
-                <div className="form-group">
-                  <label>作物</label>
-                  <input
-                    type="text"
-                    value={historyForm.crop}
-                    onChange={(e) => setHistoryForm({ ...historyForm, crop: e.target.value })}
-                    placeholder="例: 馬鈴薯"
-                    required
-                  />
-                </div>
-                <button type="submit" className="btn-primary">
-                  追加
-                </button>
-              </div>
-            </form>
+              </form>
+            </details>
 
             {historyLoading ? (
               <Spinner text="履歴を読み込み中..." size="sm" />

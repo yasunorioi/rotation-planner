@@ -986,6 +986,14 @@ def list_fields(current_user: Dict = Depends(get_current_user)):
     return [FieldResponse.from_db(f, user_id=current_user["id"]) for f in fields]
 
 
+@app.get("/api/fields/districts")
+def list_districts(current_user: Dict = Depends(get_current_user)):
+    """ユーザーの登録済みほ場からユニークな地区名一覧を返す"""
+    fields = FieldRepository.get_fields(current_user["id"])
+    districts = sorted(set(f["district"] for f in fields if f.get("district")))
+    return {"districts": districts}
+
+
 @app.post("/api/fields", response_model=FieldResponse, status_code=201)
 def create_field(field: FieldCreate, current_user: Dict = Depends(get_current_user)):
     # 面積バリデーション

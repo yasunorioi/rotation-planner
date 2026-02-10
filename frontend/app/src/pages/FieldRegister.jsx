@@ -76,11 +76,16 @@ export default function FieldRegister() {
   // KMLプレビュー編集用（2段階インポート）
   const [kmlPreviewData, setKmlPreviewData] = useState([]); // 編集可能なプレビューデータ
   const [kmlCoordsData, setKmlCoordsData] = useState([]);   // 座標データ（登録時に使用）
+  const [bulkDistrict, setBulkDistrict] = useState('');      // 一括設定用地区
   const [bulkCrop, setBulkCrop] = useState('');             // 一括設定用作物
   const [bulkBeetForbidden, setBulkBeetForbidden] = useState(false); // 一括設定用てんさい禁止
   const [kmlYear, setKmlYear] = useState(getCurrentFiscalYear()); // KML登録用年度
   const [isParsing, setIsParsing] = useState(false);        // KML解析中フラグ
   const [isRegistering, setIsRegistering] = useState(false); // 一括登録中フラグ
+
+  // 地区自動提案
+  const [districts, setDistricts] = useState([]);
+  const [suggestedDistrict, setSuggestedDistrict] = useState(null);
 
   // 筆ポリゴン
   const [showFudePolygons, setShowFudePolygons] = useState(false);
@@ -93,6 +98,7 @@ export default function FieldRegister() {
   useEffect(() => {
     loadFields();
     loadCrops();
+    loadDistricts();
   }, []);
 
   const loadCrops = async () => {
@@ -101,6 +107,34 @@ export default function FieldRegister() {
       setCrops(data);
     } catch (err) {
       console.error('Failed to load crops:', err);
+    }
+  };
+
+  const loadDistricts = async () => {
+    try {
+      const data = await fieldApi.getDistricts();
+      setDistricts(data);
+    } catch (err) {
+      console.error('Failed to load districts:', err);
+    }
+  };
+
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=15&addressdetails=1`,
+        { headers: { 'User-Agent': 'FieldRegisterApp/1.0' } }
+      );
+      const data = await response.json();
+      const addr = data.address || {};
+      const district = addr.suburb || addr.neighbourhood || addr.city_district || addr.village || null;
+      if (district) {
+        setSuggestedDistrict(district);
+        // フォームの地区に自動セット
+        setFormData((prev) => ({ ...prev, district }));
+      }
+    } catch (err) {
+      console.error('Reverse geocode error:', err);
     }
   };
 
@@ -120,6 +154,16 @@ export default function FieldRegister() {
   const handlePolygonCreated = useCallback((coords, area) => {
     setDrawnCoords(coords);
     setDrawnArea(area);
+
+    // ポリゴン重心から逆ジオコーディングで地区名を自動提案
+    if (coords && coords.length >= 3) {
+      const latSum = coords.reduce((sum, c) => sum + c[0], 0);
+      const lngSum = coords.reduce((sum, c) => sum + c[1], 0);
+      const centroidLat = latSum / coords.length;
+      const centroidLng = lngSum / coords.length;
+      setSuggestedDistrict(null);
+      reverseGeocode(centroidLat, centroidLng);
+    }
   }, []);
 
   // ほ場クリック
@@ -274,12 +318,14 @@ export default function FieldRegister() {
       setFormData({ field_name: '', district: '', beet_forbidden: false, crop_year: '', crop_name: '' });
       setDrawnCoords(null);
       setDrawnArea(0);
+      setSuggestedDistrict(null);
 
       if (mapRef.current?.clearDrawing) {
         mapRef.current.clearDrawing();
       }
 
       loadFields();
+      loadDistricts();
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.detail || '登録に失敗しました' });
     }
@@ -380,6 +426,7 @@ export default function FieldRegister() {
     setImportedFields([]);
     setKmlPreviewData([]);
     setKmlCoordsData([]);
+    setBulkDistrict('');
     setBulkCrop('');
     setBulkBeetForbidden(false);
     if (fileInputRef.current) {
@@ -435,6 +482,7 @@ export default function FieldRegister() {
         previewData.push({
           field_id: fieldId,
           field_name: name,
+          district: '',
           area_ha: areaHa,
           area_a: areaHa * 100,
           crop: '',
@@ -449,7 +497,34 @@ export default function FieldRegister() {
 
       setKmlPreviewData(previewData);
       setKmlCoordsData(coordsData);
-      setMessage({ type: 'success', text: `${previewData.length}件のほ場を検出しました。作物・てんさい禁止を設定して登録してください。` });
+      setMessage({ type: 'success', text: `${previewData.length}件のほ場を検出しました。作物・地区・てんさい禁止を設定して登録してください。` });
+
+      // 最初の1件から逆ジオコーディングで地区名を自動割当
+      if (coordsData.length > 0 && coordsData[0].coordinates?.length >= 3) {
+        const coords = coordsData[0].coordinates;
+        const latSum = coords.reduce((sum, c) => sum + c[0], 0);
+        const lngSum = coords.reduce((sum, c) => sum + c[1], 0);
+        const centroidLat = latSum / coords.length;
+        const centroidLng = lngSum / coords.length;
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${centroidLat}&lon=${centroidLng}&format=json&zoom=15&addressdetails=1`,
+            { headers: { 'User-Agent': 'FieldRegisterApp/1.0' } }
+          );
+          const data = await response.json();
+          const addr = data.address || {};
+          const district = addr.suburb || addr.neighbourhood || addr.city_district || addr.village || null;
+          if (district) {
+            setSuggestedDistrict(district);
+            // 全行に自動割当（ユーザーが確認後に一括登録）
+            setKmlPreviewData((prev) =>
+              prev.map((row) => ({ ...row, district }))
+            );
+          }
+        } catch (err) {
+          console.error('KML reverse geocode error:', err);
+        }
+      }
     } catch (err) {
       console.error('KML parse error:', err);
       const detail = err.response?.data?.detail || err.message || '不明なエラー';
@@ -482,6 +557,20 @@ export default function FieldRegister() {
       prev.map((row) => ({ ...row, crop: bulkCrop }))
     );
     setMessage({ type: 'success', text: `全${kmlPreviewData.length}件に「${bulkCrop}」を適用しました` });
+  };
+
+  /**
+   * 全行に地区を一括適用
+   */
+  const handleApplyBulkDistrict = () => {
+    if (!bulkDistrict) {
+      setMessage({ type: 'error', text: '一括適用する地区を入力してください' });
+      return;
+    }
+    setKmlPreviewData((prev) =>
+      prev.map((row) => ({ ...row, district: bulkDistrict }))
+    );
+    setMessage({ type: 'success', text: `全${kmlPreviewData.length}件に地区「${bulkDistrict}」を適用しました` });
   };
 
   /**
@@ -522,7 +611,7 @@ export default function FieldRegister() {
         const createData = {
           field_code: preview.field_id,
           field_name: preview.field_name || null,
-          district: null,
+          district: preview.district || null,
           area_ha: preview.area_ha,
           beet_forbidden: preview.beet_forbidden,
           coordinates_json: JSON.stringify(coords.coordinates),
@@ -547,6 +636,7 @@ export default function FieldRegister() {
       setMessage({ type: 'success', text: `${successCount}件のほ場を登録しました` });
       handleClearImport();
       loadFields();
+      loadDistricts();
     } else {
       setMessage({
         type: errors.length === kmlPreviewData.length ? 'error' : 'warning',
@@ -718,8 +808,17 @@ export default function FieldRegister() {
                   type="text"
                   value={formData.district}
                   onChange={(e) => setFormData({ ...formData, district: e.target.value })}
-                  placeholder="例: 北地区"
+                  list="district-options"
+                  placeholder="地区名を入力または選択"
                 />
+                <datalist id="district-options">
+                  {districts.map((d) => <option key={d} value={d} />)}
+                </datalist>
+                {suggestedDistrict && formData.district === suggestedDistrict && (
+                  <div style={{ marginTop: '4px', fontSize: '0.85em', color: '#28a745' }}>
+                    📍 {suggestedDistrict}（自動取得）
+                  </div>
+                )}
               </div>
               <div className="form-group checkbox">
                 <label>
@@ -768,8 +867,8 @@ export default function FieldRegister() {
                     >
                       <option value="">-- 選択しない --</option>
                       {crops.map((c) => (
-                        <option key={c.crop_id} value={c.crop_name}>
-                          {c.custom_name || c.crop_name}
+                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                          {c.custom_name || c.name || c.crop_name}
                         </option>
                       ))}
                     </select>
@@ -880,14 +979,35 @@ export default function FieldRegister() {
                     >
                       <option value="">-- 作物選択 --</option>
                       {crops.map((c) => (
-                        <option key={c.crop_id} value={c.crop_name}>
-                          {c.custom_name || c.crop_name}
+                        <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                          {c.custom_name || c.name || c.crop_name}
                         </option>
                       ))}
                     </select>
                     <button onClick={handleApplyBulkCrop} className="btn-secondary btn-small">
                       📋 作物を全ほ場に適用
                     </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={bulkDistrict}
+                      onChange={(e) => setBulkDistrict(e.target.value)}
+                      list="district-options-kml"
+                      placeholder="地区名"
+                      style={{ padding: '4px 8px', minWidth: '120px' }}
+                    />
+                    <datalist id="district-options-kml">
+                      {districts.map((d) => <option key={d} value={d} />)}
+                    </datalist>
+                    <button onClick={handleApplyBulkDistrict} className="btn-secondary btn-small">
+                      📋 地区を全ほ場に適用
+                    </button>
+                    {suggestedDistrict && (
+                      <span style={{ fontSize: '0.85em', color: '#28a745' }}>
+                        📍 {suggestedDistrict}（自動割当済）
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -909,11 +1029,12 @@ export default function FieldRegister() {
                   <table className="data-table" style={{ fontSize: '0.85em' }}>
                     <thead style={{ position: 'sticky', top: 0, background: '#f8f9fa' }}>
                       <tr>
-                        <th style={{ width: '15%' }}>ほ場ID</th>
-                        <th style={{ width: '25%' }}>ほ場名</th>
-                        <th style={{ width: '12%' }}>面積(ha)</th>
-                        <th style={{ width: '25%' }}>作物</th>
-                        <th style={{ width: '10%' }}>禁止</th>
+                        <th style={{ width: '13%' }}>ほ場ID</th>
+                        <th style={{ width: '20%' }}>ほ場名</th>
+                        <th style={{ width: '15%' }}>地区</th>
+                        <th style={{ width: '10%' }}>面積(ha)</th>
+                        <th style={{ width: '22%' }}>作物</th>
+                        <th style={{ width: '8%' }}>禁止</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -935,6 +1056,15 @@ export default function FieldRegister() {
                               style={{ width: '100%', padding: '2px 4px' }}
                             />
                           </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.district}
+                              onChange={(e) => handlePreviewRowChange(idx, 'district', e.target.value)}
+                              list="district-options-kml"
+                              style={{ width: '100%', padding: '2px 4px' }}
+                            />
+                          </td>
                           <td style={{ textAlign: 'right' }}>{row.area_ha.toFixed(2)}</td>
                           <td>
                             <select
@@ -944,8 +1074,8 @@ export default function FieldRegister() {
                             >
                               <option value="">-- 未設定 --</option>
                               {crops.map((c) => (
-                                <option key={c.crop_id} value={c.crop_name}>
-                                  {c.custom_name || c.crop_name}
+                                <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                                  {c.custom_name || c.name || c.crop_name}
                                 </option>
                               ))}
                             </select>

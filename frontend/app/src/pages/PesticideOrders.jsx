@@ -450,8 +450,8 @@ export default function PesticideOrders() {
                         >
                           <option value="">選択してください</option>
                           {crops.map((c) => (
-                            <option key={c.crop_id} value={c.crop_name}>
-                              {c.custom_name || c.crop_name}
+                            <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                              {c.custom_name || c.name || c.crop_name}
                             </option>
                           ))}
                         </select>
@@ -545,8 +545,8 @@ export default function PesticideOrders() {
                         >
                           <option value="">選択してください</option>
                           {crops.map((c) => (
-                            <option key={c.crop_id} value={c.crop_name}>
-                              {c.custom_name || c.crop_name}
+                            <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                              {c.custom_name || c.name || c.crop_name}
                             </option>
                           ))}
                         </select>

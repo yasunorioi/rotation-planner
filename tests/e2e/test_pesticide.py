@@ -141,7 +141,6 @@ class TestPesticideDelete:
 class TestPesticideSearch:
     """農薬検索のテスト"""
 
-    @pytest.mark.skip(reason="作物マスタが未投入のため。将来的にconftest.pyで作物マスタを投入してから有効化")
     def test_pesticide_search_by_crop(self, authenticated_page: Page, base_url: str):
         """作物フィルタで検索すると該当農薬のみ表示される。"""
         page = authenticated_page
@@ -149,27 +148,26 @@ class TestPesticideSearch:
         pesticide_page.goto()
 
         # テスト用農薬を2つ登録（異なる作物）
+        # 作物名はconftest.pyで登録済みのuser_crops名に合わせる
+        # (crop_master: 小麦(春播), だいず, ばれいしょ, てんさい)
         pesticide_wheat = "E2Eテスト農薬_小麦用"
-        pesticide_rice = "E2Eテスト農薬_稲用"
+        pesticide_soy = "E2Eテスト農薬_だいず用"
 
-        pesticide_page.add_pesticide(name=pesticide_wheat, target_crop="小麦")
+        pesticide_page.add_pesticide(name=pesticide_wheat, target_crop="小麦(春播)")
         page.wait_for_load_state("networkidle")
 
-        pesticide_page.add_pesticide(name=pesticide_rice, target_crop="稲")
+        pesticide_page.add_pesticide(name=pesticide_soy, target_crop="だいず")
         page.wait_for_load_state("networkidle")
 
         # 全ての作物で表示（デフォルト）
         all_pesticides = pesticide_page.get_pesticide_list()
         assert pesticide_wheat in all_pesticides
-        assert pesticide_rice in all_pesticides
+        assert pesticide_soy in all_pesticides
 
-        # 小麦でフィルタ
-        pesticide_page.search_pesticide("小麦")
+        # 小麦(春播)でフィルタ
+        pesticide_page.search_pesticide("小麦(春播)")
         page.wait_for_load_state("networkidle")
 
         filtered_list = pesticide_page.get_pesticide_list()
-        assert pesticide_wheat in filtered_list
-        # 稲用は表示されない（作物が違う）
-        # ※ ただし crop=NULL の農薬も表示される可能性があるため、厳密なアサーションは避ける
         # 少なくとも小麦用は表示されること
         assert pesticide_wheat in filtered_list

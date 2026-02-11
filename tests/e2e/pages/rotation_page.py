@@ -17,7 +17,7 @@ class RotationPage(BasePage):
         # Locators（画面構造に応じて調整）
         self.save_name_input = page.locator("input[name='saveName'], input[placeholder*='計画名']")
         self.optimize_button = page.get_by_role("button", name="最適化実行")
-        self.result_table = page.locator("table.result-table, .rotation-result table")
+        self.result_table = page.locator("table.rotation-table")
         self.plan_list = page.locator(".plan-list, .saved-plans")
         self.loading_indicator = page.locator(".spinner, .loading")
 

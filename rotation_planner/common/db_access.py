@@ -53,9 +53,10 @@ def get_connection() -> sqlite3.Connection:
     Returns:
         sqlite3.Connection: データベース接続
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
     conn.row_factory = sqlite3.Row  # 辞書形式でアクセス可能
     conn.execute("PRAGMA foreign_keys = ON")  # 外部キー制約有効化
+    conn.execute("PRAGMA journal_mode = WAL")  # WALモード（書き込み性能向上）
     return conn
 
 
@@ -75,6 +76,51 @@ def get_db():
     except Exception as e:
         conn.rollback()
         raise e
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transaction():
+    """
+    明示的なトランザクション管理（エラー分類つき）
+
+    Usage:
+        with transaction() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(...)
+            # 自動コミット・分類されたエラー
+
+    Raises:
+        DuplicateKeyError: UNIQUE制約違反
+        NotNullViolationError: NOT NULL制約違反
+        ForeignKeyViolationError: 外部キー制約違反
+        DatabaseError: その他のDBエラー
+    """
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        error_msg = str(e).lower()
+        if "unique" in error_msg:
+            raise DuplicateKeyError(str(e))
+        elif "not null" in error_msg:
+            raise NotNullViolationError(str(e))
+        elif "foreign key" in error_msg:
+            raise ForeignKeyViolationError(str(e))
+        else:
+            raise DatabaseError(str(e))
+    except sqlite3.OperationalError as e:
+        conn.rollback()
+        logger.error(f"DB operational error: {e}")
+        raise DatabaseError(str(e))
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"DB error: {e}")
+        raise DatabaseError(str(e))
     finally:
         conn.close()
 
@@ -1035,7 +1081,7 @@ class PesticideMasterRepository:
             cursor = conn.execute("""
                 SELECT * FROM pesticide_masters
                 WHERE crop = ? AND (org_id IS NULL OR org_id = ?)
-                ORDER BY month, period
+                ORDER BY name
             """, (crop, org_id))
             return rows_to_list(cursor.fetchall())
 
@@ -1046,7 +1092,7 @@ class PesticideMasterRepository:
             cursor = conn.execute("""
                 SELECT * FROM pesticide_masters
                 WHERE org_id IS NULL OR org_id = ?
-                ORDER BY crop, month, period
+                ORDER BY crop, name
             """, (org_id,))
             return rows_to_list(cursor.fetchall())
 
@@ -1066,20 +1112,20 @@ class PesticideMasterRepository:
         with get_db() as conn:
             cursor = conn.execute("""
                 INSERT INTO pesticide_masters
-                (org_id, crop, month, period, target, pesticide_name,
-                 dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
+                (org_id, name, crop, category, manufacturer, active_ingredient,
+                 usage_timing, dilution_rate, application_method, safety_interval, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 data.get('org_id'),
+                data.get('name'),
                 data.get('crop'),
-                data.get('month'),
-                data.get('period'),
-                data.get('target'),
-                data.get('pesticide_name'),
+                data.get('category'),
+                data.get('manufacturer'),
+                data.get('active_ingredient'),
+                data.get('usage_timing'),
                 data.get('dilution_rate'),
-                data.get('amount_per_10a'),
-                data.get('unit'),
-                data.get('days_before_harvest'),
+                data.get('application_method'),
+                data.get('safety_interval'),
                 data.get('notes'),
             ))
             return cursor.lastrowid
@@ -1090,27 +1136,27 @@ class PesticideMasterRepository:
         with get_db() as conn:
             cursor = conn.execute("""
                 UPDATE pesticide_masters SET
+                    name = ?,
                     crop = ?,
-                    month = ?,
-                    period = ?,
-                    target = ?,
-                    pesticide_name = ?,
+                    category = ?,
+                    manufacturer = ?,
+                    active_ingredient = ?,
+                    usage_timing = ?,
                     dilution_rate = ?,
-                    amount_per_10a = ?,
-                    unit = ?,
-                    days_before_harvest = ?,
+                    application_method = ?,
+                    safety_interval = ?,
                     notes = ?
                 WHERE id = ?
             """, (
+                data.get('name'),
                 data.get('crop'),
-                data.get('month'),
-                data.get('period'),
-                data.get('target'),
-                data.get('pesticide_name'),
+                data.get('category'),
+                data.get('manufacturer'),
+                data.get('active_ingredient'),
+                data.get('usage_timing'),
                 data.get('dilution_rate'),
-                data.get('amount_per_10a'),
-                data.get('unit'),
-                data.get('days_before_harvest'),
+                data.get('application_method'),
+                data.get('safety_interval'),
                 data.get('notes'),
                 master_id,
             ))
@@ -1128,28 +1174,30 @@ class PesticideMasterRepository:
 
     @staticmethod
     def bulk_import(records: List[Dict[str, Any]], org_id: int = None) -> int:
-        """CSVからの一括インポート"""
+        """CSVからの一括インポート（新スキーマ対応）"""
         try:
             count = 0
             with get_db() as conn:
                 for record in records:
                     record['org_id'] = org_id
+                    # 旧カラム名からの変換（互換性のため）
+                    name = record.get('name') or record.get('pesticide_name')
                     conn.execute("""
                         INSERT INTO pesticide_masters
-                        (org_id, crop, month, period, target, pesticide_name,
-                         dilution_rate, amount_per_10a, unit, days_before_harvest, notes)
+                        (org_id, name, crop, category, manufacturer, active_ingredient,
+                         usage_timing, dilution_rate, application_method, safety_interval, notes)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         record.get('org_id'),
+                        name,
                         record.get('crop'),
-                        record.get('month'),
-                        record.get('period'),
-                        record.get('target'),
-                        record.get('pesticide_name'),
+                        record.get('category'),
+                        record.get('manufacturer'),
+                        record.get('active_ingredient'),
+                        record.get('usage_timing'),
                         record.get('dilution_rate'),
-                        record.get('amount_per_10a'),
-                        record.get('unit'),
-                        record.get('days_before_harvest'),
+                        record.get('application_method'),
+                        record.get('safety_interval'),
                         record.get('notes'),
                     ))
                     count += 1

@@ -36,7 +36,8 @@ class FieldPage(BasePage):
         # 作付履歴モーダルロケータ
         self.history_modal = page.locator(".modal-lg")
         self.history_modal_title = page.locator("h2", has_text="作付履歴")
-        self.history_table = self.history_modal.locator("table.data-table").last
+        # 履歴テーブルは thead に「作物」ヘッダーを持つテーブル（一括登録テーブルと区別）
+        self.history_table = self.history_modal.locator("table.data-table:has(thead:has-text('作物'))")
         self.close_history_button = page.get_by_role("button", name="閉じる")
 
     def goto(self) -> "FieldPage":

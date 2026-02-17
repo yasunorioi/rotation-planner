@@ -1,5 +1,5 @@
 """
-テスト共通設定 — Gradio未インストール環境での回避策 + DB一元管理 + フィクスチャ
+テスト共通設定 — DB一元管理 + フィクスチャ
 """
 import os
 import sys
@@ -8,20 +8,11 @@ import tempfile
 import shutil
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Gradio およびGradio依存モジュールをモック（未インストール環境対応）
-for mod_name in [
-    'gradio', 'gradio.themes', 'gradio.components',
-    'gradio_folium',
-]:
-    if mod_name not in sys.modules:
-        sys.modules[mod_name] = MagicMock()
 
 # 共通テスト用DBパスを設定（全テストファイルで統一）
 _test_db_fd, _shared_test_db_path = tempfile.mkstemp(suffix='_test.db')

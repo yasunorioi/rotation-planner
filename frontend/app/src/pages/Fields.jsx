@@ -66,6 +66,7 @@ export default function Fields() {
   const [showCropEditModal, setShowCropEditModal] = useState(false);
   const [editingCell, setEditingCell] = useState(null); // { fieldId, year, fieldCode }
   const [editingCrop, setEditingCrop] = useState('');
+  const [editingCropFreeInput, setEditingCropFreeInput] = useState(false);
 
   // ユーザー作物（ドロップダウン用）
   const [userCrops, setUserCrops] = useState([]);
@@ -245,14 +246,26 @@ export default function Fields() {
   const currentFiscalYear = new Date().getMonth() < 3 ? new Date().getFullYear() - 1 : new Date().getFullYear();
   const bulkHistoryYears = [currentFiscalYear - 3, currentFiscalYear - 2, currentFiscalYear - 1, currentFiscalYear];
   const [bulkHistory, setBulkHistory] = useState({});
+  const [bulkHistoryFreeInput, setBulkHistoryFreeInput] = useState({}); // { year: true/false }
 
   const initBulkHistory = (existingHistory) => {
     const map = {};
+    const freeMap = {};
     bulkHistoryYears.forEach((y) => {
       const existing = existingHistory.find((h) => h.year === y);
       map[y] = existing ? existing.crop : '';
+      // 既存履歴がユーザー作物リストにない場合は手入力モードにする
+      if (existing && existing.crop) {
+        const inUserCrops = userCrops.some(
+          (c) => (c.name || c.crop_name) === existing.crop || (c.custom_name) === existing.crop
+        );
+        freeMap[y] = !inUserCrops;
+      } else {
+        freeMap[y] = false;
+      }
     });
     setBulkHistory(map);
+    setBulkHistoryFreeInput(freeMap);
   };
 
   const handleBulkHistorySubmit = async () => {
@@ -289,7 +302,17 @@ export default function Fields() {
   // ========== 年度別作物編集 ==========
   const handleCellClick = (field, year) => {
     setEditingCell({ fieldId: field.id, year, fieldCode: field.field_code });
-    setEditingCrop(getCropForCell(field.id, year));
+    const crop = getCropForCell(field.id, year);
+    setEditingCrop(crop);
+    // 既存作物がユーザー作物リストにない場合は手入力モードで開く
+    if (crop) {
+      const inUserCrops = userCrops.some(
+        (c) => (c.name || c.crop_name) === crop || c.custom_name === crop
+      );
+      setEditingCropFreeInput(!inUserCrops);
+    } else {
+      setEditingCropFreeInput(false);
+    }
     setShowCropEditModal(true);
   };
 
@@ -318,6 +341,7 @@ export default function Fields() {
     setShowCropEditModal(false);
     setEditingCell(null);
     setEditingCrop('');
+    setEditingCropFreeInput(false);
   };
 
   // KMZエクスポート
@@ -462,18 +486,50 @@ export default function Fields() {
                   <tr>
                     {bulkHistoryYears.map((y) => (
                       <td key={y}>
-                        <select
-                          value={bulkHistory[y] || ''}
-                          onChange={(e) => setBulkHistory((prev) => ({ ...prev, [y]: e.target.value }))}
-                          style={{ width: '100%', padding: '4px' }}
-                        >
-                          <option value="">--</option>
-                          {userCrops.map((c) => (
-                            <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
-                              {c.custom_name || c.name || c.crop_name}
-                            </option>
-                          ))}
-                        </select>
+                        {bulkHistoryFreeInput[y] ? (
+                          <div style={{ display: 'flex', gap: '2px' }}>
+                            <input
+                              type="text"
+                              value={bulkHistory[y] || ''}
+                              onChange={(e) => setBulkHistory((prev) => ({ ...prev, [y]: e.target.value }))}
+                              placeholder="作物名"
+                              style={{ width: '100%', padding: '4px' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBulkHistoryFreeInput((prev) => ({ ...prev, [y]: false }));
+                                setBulkHistory((prev) => ({ ...prev, [y]: '' }));
+                              }}
+                              style={{ padding: '2px 6px', fontSize: '0.85em', whiteSpace: 'nowrap' }}
+                              className="btn-secondary"
+                              title="選択に戻す"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <select
+                            value={bulkHistory[y] || ''}
+                            onChange={(e) => {
+                              if (e.target.value === '__other__') {
+                                setBulkHistoryFreeInput((prev) => ({ ...prev, [y]: true }));
+                                setBulkHistory((prev) => ({ ...prev, [y]: '' }));
+                              } else {
+                                setBulkHistory((prev) => ({ ...prev, [y]: e.target.value }));
+                              }
+                            }}
+                            style={{ width: '100%', padding: '4px' }}
+                          >
+                            <option value="">--</option>
+                            {userCrops.map((c) => (
+                              <option key={c.id || c.crop_id} value={c.name || c.crop_name}>
+                                {c.custom_name || c.name || c.crop_name}
+                              </option>
+                            ))}
+                            <option value="__other__">その他（手入力）</option>
+                          </select>
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -526,26 +582,45 @@ export default function Fields() {
             </p>
             <div className="form-group">
               <label>作物</label>
-              {userCrops.length > 0 ? (
+              {editingCropFreeInput ? (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <input
+                    type="text"
+                    value={editingCrop}
+                    onChange={(e) => setEditingCrop(e.target.value)}
+                    placeholder="作物名を入力"
+                    style={{ flex: 1, padding: '8px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setEditingCropFreeInput(false); setEditingCrop(''); }}
+                    className="btn-secondary"
+                    title="選択に戻す"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
                 <select
                   value={editingCrop}
-                  onChange={(e) => setEditingCrop(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value === '__other__') {
+                      setEditingCropFreeInput(true);
+                      setEditingCrop('');
+                    } else {
+                      setEditingCrop(e.target.value);
+                    }
+                  }}
                   style={{ width: '100%', padding: '8px' }}
                 >
                   <option value="">（未設定）</option>
                   {userCrops.map((c) => (
                     <option key={c.id} value={c.name || c.custom_name}>
-                      {c.name || c.custom_name}
+                      {c.custom_name || c.name || c.crop_name}
                     </option>
                   ))}
+                  <option value="__other__">その他（手入力）</option>
                 </select>
-              ) : (
-                <input
-                  type="text"
-                  value={editingCrop}
-                  onChange={(e) => setEditingCrop(e.target.value)}
-                  placeholder="作物名を入力"
-                />
               )}
             </div>
             <div className="form-actions">

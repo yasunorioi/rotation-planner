@@ -6,7 +6,7 @@
  * - その他の作物はFAMIC検索から追加
  */
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { cropApi } from '../lib/api';
 import { PageLoading } from '../components/Loading';
 
@@ -20,7 +20,7 @@ export default function CropSettings() {
   const [customCrops, setCustomCrops] = useState([]); // カスタム作物リスト
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isAutoSaving, setIsAutoSaving] = useState(false); // 自動保存中インジケータ
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [message, setMessage] = useState(null);
 
   // カスタム作物追加用
@@ -34,10 +34,7 @@ export default function CropSettings() {
   const [isSearchingFamic, setIsSearchingFamic] = useState(false);
   const [selectedFamicCrop, setSelectedFamicCrop] = useState('');
 
-  // デバウンス用タイマー
-  const saveTimerRef = useRef(null);
   const searchTimerRef = useRef(null);
-  const pendingCropIdsRef = useRef(null); // 保存待ちのcropIds
 
   useEffect(() => {
     loadData();
@@ -74,36 +71,6 @@ export default function CropSettings() {
     }
   };
 
-  // デバウンス自動保存（500ms）
-  const debouncedSave = useCallback((newCropIds) => {
-    // 既存のタイマーをクリア
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-
-    // 保存待ちデータを更新
-    pendingCropIdsRef.current = newCropIds;
-    setIsAutoSaving(true);
-
-    // 500ms後に保存
-    saveTimerRef.current = setTimeout(async () => {
-      const cropIdsToSave = pendingCropIdsRef.current;
-      if (cropIdsToSave === null) return;
-
-      try {
-        await cropApi.updateUserCrops(cropIdsToSave);
-        setMessage({ type: 'success', text: '自動保存しました' });
-        // 3秒後にメッセージをクリア
-        setTimeout(() => setMessage(null), 3000);
-      } catch (err) {
-        setMessage({ type: 'error', text: '自動保存に失敗しました' });
-      } finally {
-        setIsAutoSaving(false);
-        pendingCropIdsRef.current = null;
-      }
-    }, 500);
-  }, []);
-
   // FAMIC検索（デバウンス300ms）
   const debouncedFamicSearch = useCallback((keyword) => {
     if (searchTimerRef.current) {
@@ -135,9 +102,6 @@ export default function CropSettings() {
   // コンポーネントアンマウント時にタイマーをクリア
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
       if (searchTimerRef.current) {
         clearTimeout(searchTimerRef.current);
       }
@@ -147,10 +111,9 @@ export default function CropSettings() {
   const handleCropToggle = (cropId) => {
     setSelectedCropIds((prev) => {
       const newIds = prev.includes(cropId) ? prev.filter((id) => id !== cropId) : [...prev, cropId];
-      // デバウンス自動保存を発火
-      debouncedSave(newIds);
       return newIds;
     });
+    setHasUnsavedChanges(true);
   };
 
   const handleSave = async () => {
@@ -158,6 +121,7 @@ export default function CropSettings() {
     setMessage(null);
     try {
       await cropApi.updateUserCrops(selectedCropIds);
+      setHasUnsavedChanges(false);
       setMessage({ type: 'success', text: '保存しました' });
       await loadData();
     } catch (err) {
@@ -282,13 +246,12 @@ export default function CropSettings() {
       <div className="page-header">
         <h1>作物設定</h1>
         <div className="header-actions">
-          {isAutoSaving && (
-            <span style={{ color: '#666', fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>...</span>
-              自動保存中...
+          {hasUnsavedChanges && (
+            <span style={{ color: '#e65100', fontSize: '0.9em' }}>
+              未保存の変更があります
             </span>
           )}
-          <button onClick={handleSave} className="btn-primary" disabled={isSaving || isAutoSaving}>
+          <button onClick={handleSave} className="btn-primary" disabled={isSaving}>
             {isSaving ? '保存中...' : '保存'}
           </button>
         </div>

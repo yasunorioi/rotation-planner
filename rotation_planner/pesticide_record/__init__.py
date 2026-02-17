@@ -41,10 +41,7 @@ from rotation_planner.pesticide_record.export import (
     check_export_support,
 )
 
-from rotation_planner.pesticide_record.ui import (
-    create_pesticide_record_ui,
-    load_initial_fields,
-)
+# UI (Gradio UI は削除済み。React版へ移行)
 
 __all__ = [
     # image_analyzer
@@ -55,7 +52,5 @@ __all__ = [
     "export_records_csv",
     "export_records_pdf",
     "check_export_support",
-    # ui
-    "create_pesticide_record_ui",
-    "load_initial_fields",
+    # ui (Gradio UI は削除済み)
 ]

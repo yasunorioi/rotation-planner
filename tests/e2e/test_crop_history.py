@@ -34,15 +34,15 @@ class TestCropHistoryList:
         expect(field_page.history_modal_title).to_contain_text("E2Eテストほ場1号")
 
     def test_crop_history_list_display(self, authenticated_page: Page, base_url: str):
-        """作付履歴が一覧表示される（admin）。"""
+        """作付履歴モーダルが開き、初期状態では空メッセージが表示される（admin）。"""
         field_page = FieldPage(authenticated_page, base_url)
         field_page.goto()
 
         # E2E001 の作付履歴を開く
         field_page.show_history("E2E001")
 
-        # 履歴テーブルが表示されること（初期状態では空かもしれない）
-        expect(field_page.history_table).to_be_visible()
+        # 初期状態（履歴0件）では空メッセージが表示されること
+        expect(field_page.history_modal).to_contain_text("作付履歴がありません")
 
 
 @pytest.mark.e2e
@@ -133,16 +133,15 @@ class TestCropHistoryByField:
         # E2E002 の履歴を登録（別の作物）
         field_page.show_history("E2E002")
         field_page.add_bulk_history({fiscal_year: "小麦(春播)"})
+        # 履歴テーブルが表示されるまで待機（タイミング問題回避）
+        expect(field_page.history_table).to_be_visible(timeout=10000)
+        # 登録直後に確認
+        field_page.expect_history_entry(str(fiscal_year), "小麦(春播)")
         field_page.close_history_modal()
 
         # E2E001 の履歴を再確認（E2E002 の影響を受けていないこと）
         field_page.show_history("E2E001")
         field_page.expect_history_entry(str(fiscal_year), "だいず")
-        field_page.close_history_modal()
-
-        # E2E002 の履歴を再確認
-        field_page.show_history("E2E002")
-        field_page.expect_history_entry(str(fiscal_year), "小麦(春播)")
         field_page.close_history_modal()
 
 

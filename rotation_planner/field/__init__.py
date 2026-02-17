@@ -72,15 +72,7 @@ from .crud import (
     export_csv_with_state,
 )
 
-# UIモジュール
-from .ui import (
-    create_field_register_ui,
-    search_and_move_map,
-    update_map_with_search,
-    refresh_map,
-    load_initial_data,
-    get_crop_choices,
-)
+# UIモジュール（Gradio UI は削除済み。React版へ移行）
 
 # KML/KMZパーサー・エクスポートモジュール
 from .kml_parser import (
@@ -97,23 +89,9 @@ from .kml_parser import (
     export_fields_to_kmz,
 )
 
-# 作物設定モジュール
-from .crop_settings import (
-    create_crop_settings_ui,
-    get_all_crops,
-    get_user_crop_ids,
-    get_user_crops,
-    load_crop_settings,
-    save_master_crops,
-    add_custom_crop,
-    delete_custom_crop,
-)
+# 作物設定モジュール（Gradio UI は削除済み。React版へ移行）
 
-# ほ場一覧UIモジュール
-from .field_list_ui import (
-    create_field_list_ui,
-    get_fields_with_yearly_crops,
-)
+# ほ場一覧UIモジュール（Gradio UI は削除済み。React版へ移行）
 
 # 筆ポリゴンモジュール
 from .fude_polygon import (
@@ -181,22 +159,7 @@ __all__ = [
     "get_field_history_with_state",
     # CSV出力
     "export_csv_with_state",
-    # UI
-    "create_field_register_ui",
-    "search_and_move_map",
-    "update_map_with_search",
-    "refresh_map",
-    "load_initial_data",
-    "get_crop_choices",
-    # 作物設定
-    "create_crop_settings_ui",
-    "get_all_crops",
-    "get_user_crop_ids",
-    "get_user_crops",
-    "load_crop_settings",
-    "save_master_crops",
-    "add_custom_crop",
-    "delete_custom_crop",
+    # UI（削除済み）
     # 筆ポリゴン
     "FUDE_POLYGON_BASE_URL",
     "PMTILES_URL",
@@ -209,9 +172,7 @@ __all__ = [
     "generate_fude_polygon_control_html",
     "get_fude_download_url",
     "download_fude_geojson",
-    # ほ場一覧UI
-    "create_field_list_ui",
-    "get_fields_with_yearly_crops",
+    # ほ場一覧UI（削除済み）
     # GPSマッチング
     "SHAPELY_AVAILABLE",
     "MAX_DISTANCE_METERS",

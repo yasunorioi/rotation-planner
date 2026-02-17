@@ -46,13 +46,7 @@ from .master import (
     get_pesticides_for_crop,
 )
 
-from .ui import (
-    create_pesticide_order_ui,
-    process_order_db,
-    get_available_years_from_db,
-    get_all_farmers_orders,
-    get_aggregate_pesticide_orders,
-)
+# UIモジュール（Gradio UI は削除済み。React版へ移行）
 
 from .rotation import (
     RotationPlanRepository,
@@ -101,12 +95,7 @@ __all__ = [
     "get_default_master_path",
     "get_crops_from_master",
     "get_pesticides_for_crop",
-    # ui
-    "create_pesticide_order_ui",
-    "process_order_db",
-    "get_available_years_from_db",
-    "get_all_farmers_orders",
-    "get_aggregate_pesticide_orders",
+    # ui（削除済み）
     # rotation
     "RotationPlanRepository",
     "get_user_plans_for_dropdown",

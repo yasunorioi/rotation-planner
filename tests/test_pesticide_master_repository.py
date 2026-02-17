@@ -57,7 +57,7 @@ def test_bulk_import_normal(test_db):
     # インポート後に取得して確認
     masters = PesticideMasterRepository.get_by_crop('じゃがいも', org_id)
     assert len(masters) == 2
-    assert masters[0]['pesticide_name'] in ['農薬A', '農薬B']
+    assert masters[0]['name'] in ['農薬A', '農薬B']
 
 
 # =============================================================================

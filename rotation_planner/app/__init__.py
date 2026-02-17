@@ -18,7 +18,6 @@ from .constraints import (
     parse_forbidden_transitions,
     parse_preferred_transitions,
     update_constraints_table,
-    update_constraints_from_csv,
 )
 
 # ユーティリティ
@@ -44,12 +43,7 @@ from .optimizer import (
     run_optimization,
 )
 
-# UI
-from .ui import (
-    create_app,
-    create_rotation_planner_ui,
-    APP_DIR,
-)
+# UI（Gradio UI は削除済み。React版へ移行）
 
 __all__ = [
     # 定数
@@ -71,7 +65,6 @@ __all__ = [
     'parse_forbidden_transitions',
     'parse_preferred_transitions',
     'update_constraints_table',
-    'update_constraints_from_csv',
     # ユーティリティ
     'parse_year_columns',
     'generate_future_years',
@@ -86,8 +79,4 @@ __all__ = [
     'RotationPlannerORTools',
     'run_sensitivity_analysis',
     'run_optimization',
-    # UI
-    'create_app',
-    'create_rotation_planner_ui',
-    'APP_DIR',
 ]

@@ -1,3 +1,7 @@
+-- NOTE: 新規インストールではこのマイグレーションは不要です。
+-- db_schema.sql に統合済みです。
+-- 既存DBからのアップグレード時のみ使用してください。
+
 -- VPS用 作物スキーマ マイグレーション
 -- 使い方: sqlite3 data/rotation_planner.db < scripts/migrate_crop_schema.sql
 

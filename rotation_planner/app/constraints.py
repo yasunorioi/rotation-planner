@@ -320,17 +320,3 @@ def update_constraints_table(crop_text: str, current_table: pd.DataFrame) -> pd.
             })
 
     return pd.DataFrame(rows)
-
-
-def update_constraints_from_csv(file) -> pd.DataFrame:
-    """制約CSVから制約テーブルを更新"""
-    import gradio as gr
-    if file is None:
-        return gr.update()
-    try:
-        df = load_constraints_csv(file.name if hasattr(file, 'name') else file)
-        if df.empty:
-            return gr.update()
-        return df
-    except Exception:
-        return gr.update()

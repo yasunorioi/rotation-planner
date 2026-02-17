@@ -1,3 +1,7 @@
+-- NOTE: 新規インストールではこのマイグレーションは不要です。
+-- db_schema.sql に統合済みです。
+-- 既存DBからのアップグレード時のみ使用してください。
+
 -- 水田ポリゴン（paddy_polygons）テーブル作成マイグレーション
 -- 使い方: sqlite3 data/rotation_planner.db < scripts/migrate_paddy_polygons.sql
 -- 冪等: 複数回実行してもエラーにならない（CREATE TABLE IF NOT EXISTS）

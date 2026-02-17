@@ -121,15 +121,15 @@ CREATE INDEX IF NOT EXISTS idx_plan_details_field ON plan_details(field_id);
 CREATE TABLE IF NOT EXISTS pesticide_masters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     org_id INTEGER REFERENCES organizations(id),
-    crop TEXT NOT NULL,
-    month INTEGER,
-    period TEXT,
-    target TEXT,
-    pesticide_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    crop TEXT,
+    category TEXT,
+    manufacturer TEXT,
+    active_ingredient TEXT,
+    usage_timing TEXT,
     dilution_rate TEXT,
-    amount_per_10a REAL,
-    unit TEXT,
-    days_before_harvest TEXT,
+    application_method TEXT,
+    safety_interval INTEGER,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

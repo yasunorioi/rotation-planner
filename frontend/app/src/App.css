@@ -104,6 +104,126 @@
   --badge-bg: #2a2b2d;
 }
 
+/* --- Theme Customizer --- */
+.theme-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.theme-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.btn-customize,
+.btn-delete-theme {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.btn-customize:hover {
+  background: var(--bg-active);
+}
+
+.btn-delete-theme {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-color: var(--error-border);
+}
+
+.btn-delete-theme:hover {
+  opacity: 0.8;
+}
+
+.theme-customizer {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.customizer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.customizer-row label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.customizer-row input[type="color"] {
+  width: 28px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px;
+  cursor: pointer;
+  background: none;
+}
+
+.customizer-name {
+  width: 100%;
+  padding: 4px 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.customizer-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.btn-save-theme,
+.btn-cancel-theme {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.btn-save-theme {
+  background: var(--primary);
+  color: var(--color-on-primary);
+  border-color: var(--primary);
+}
+
+.btn-save-theme:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-cancel-theme {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.btn-cancel-theme:hover {
+  background: var(--bg-active);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

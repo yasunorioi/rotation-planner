@@ -11,6 +11,25 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('theme') || 'default';
+    if (saved !== 'default') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+    return saved;
+  });
+
+  const handleThemeChange = (e) => {
+    const val = e.target.value;
+    setTheme(val);
+    if (val === 'default') {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.removeItem('theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', val);
+      localStorage.setItem('theme', val);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -88,6 +107,26 @@ export default function Layout() {
                 ))}
               </div>
             )}
+            <div className="nav-section" style={{ marginTop: 'auto', padding: '16px' }}>
+              <div className="nav-section-title">テーマ</div>
+              <select
+                value={theme}
+                onChange={handleThemeChange}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  background: 'var(--bg-input)',
+                  color: 'var(--text)',
+                  fontSize: '13px',
+                }}
+              >
+                <option value="default">Default</option>
+                <option value="supabase">Supabase Dark</option>
+                <option value="linear">Linear Dark</option>
+              </select>
+            </div>
           </nav>
         </aside>
         <main className="main">

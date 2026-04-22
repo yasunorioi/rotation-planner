@@ -279,7 +279,9 @@ def get_system_info(current_user: Dict = Depends(require_admin)):
             for (table_name,) in table_names:
                 if table_name.startswith('sqlite_'):
                     continue
-                cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                if not table_name.isidentifier():
+                    continue
+                cursor.execute(f"SELECT COUNT(*) FROM [{table_name}]")
                 count = cursor.fetchone()[0]
                 tables.append(TableInfo(name=table_name, count=count))
             conn.close()

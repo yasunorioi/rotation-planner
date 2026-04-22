@@ -2383,7 +2383,7 @@ def ensure_inventory_tables():
         for col_name, col_type in new_columns:
             if col_name not in existing_columns:
                 try:
-                    conn.execute(f"ALTER TABLE inventory ADD COLUMN {col_name} {col_type}")
+                    conn.execute(f"ALTER TABLE inventory ADD COLUMN [{col_name}] {col_type}")
                 except Exception as e:
                     print(f"Warning: Failed to add column {col_name}: {e}")
 

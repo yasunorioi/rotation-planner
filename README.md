@@ -3,6 +3,103 @@
 北海道畑作農家向けの統合農業管理アプリケーション。
 ほ場管理・輪作計画・農薬発注・防除記録を一元管理し、OR-Toolsによる最適化で科学的な輪作計画を自動生成する。
 
+## アーキテクチャ
+
+```mermaid
+flowchart TD
+
+subgraph group_group_backend["Backend API"]
+  node_node_api_main["API entrypoint<br/>FastAPI app<br/>[main.py]"]
+  node_node_api_routers["API routers<br/>HTTP routes"]
+  node_node_api_deps["Dependencies<br/>DI/auth glue<br/>[deps.py]"]
+end
+
+subgraph group_group_domain["Domain Core"]
+  node_node_common[("Shared core<br/>domain kernel")]
+  node_node_field{{"Fields & GIS<br/>spatial subsystem"}}
+  node_node_optimizer{{"Rotation planner<br/>CP-SAT optimizer"}}
+  node_node_crop_history["Crop history<br/>history module"]
+  node_node_pesticide{{"Pesticide ops<br/>calculation/export"}}
+  node_node_pesticide_record{{"Spray records<br/>recording/export"}}
+  node_node_famic["FAMIC import<br/>batch ingest"]
+end
+
+subgraph group_group_frontend["Frontend UI"]
+  node_node_front_app["React app<br/>SPA shell"]
+  node_node_front_pages["Pages<br/>screen layer"]
+  node_node_front_components["Shared UI<br/>components"]
+  node_node_front_state["Client state<br/>stores"]
+  node_node_front_lib["Client logic"]
+end
+
+subgraph group_group_data_ops["Data & Ops"]
+  node_node_db[("SQLite schema<br/>schema/data<br/>[db_schema.sql]")]
+  node_node_data[("Live data<br/>runtime data")]
+  node_node_scripts["Ops scripts<br/>maintenance"]
+  node_node_tests["Test suite<br/>verification"]
+end
+
+node_node_api_main -->|"registers"| node_node_api_routers
+node_node_api_main -->|"injects"| node_node_api_deps
+node_node_api_routers -->|"calls"| node_node_common
+node_node_api_routers -->|"field APIs"| node_node_field
+node_node_api_routers -->|"plan APIs"| node_node_optimizer
+node_node_api_routers -->|"pesticide APIs"| node_node_pesticide
+node_node_api_routers -->|"record APIs"| node_node_pesticide_record
+node_node_api_routers -->|"import APIs"| node_node_famic
+node_node_front_app -->|"routes to"| node_node_front_pages
+node_node_front_app -->|"uses"| node_node_front_components
+node_node_front_app -->|"stores"| node_node_front_state
+node_node_front_app -->|"fetches"| node_node_front_lib
+node_node_front_lib -->|"HTTP calls"| node_node_api_main
+node_node_common -->|"persists to"| node_node_db
+node_node_field -->|"stores"| node_node_db
+node_node_field -->|"reads caches"| node_node_data
+node_node_optimizer -->|"loads models"| node_node_common
+node_node_optimizer -->|"updates"| node_node_crop_history
+node_node_pesticide -->|"uses"| node_node_common
+node_node_pesticide -->|"reads/writes"| node_node_db
+node_node_pesticide_record -->|"persists"| node_node_db
+node_node_famic -->|"imports into"| node_node_db
+node_node_scripts -->|"migrates"| node_node_db
+node_node_tests -.->|"covers"| node_node_api_main
+node_node_tests -.->|"covers"| node_node_optimizer
+node_node_tests -.->|"covers"| node_node_field
+node_node_tests -.->|"covers"| node_node_front_app
+
+click node_node_api_main "https://github.com/yasunorioi/rotation-planner/blob/main/api/main.py"
+click node_node_api_routers "https://github.com/yasunorioi/rotation-planner/tree/main/api/routers"
+click node_node_api_deps "https://github.com/yasunorioi/rotation-planner/blob/main/api/deps.py"
+click node_node_common "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/common"
+click node_node_field "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/field"
+click node_node_optimizer "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/app"
+click node_node_crop_history "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/crop_history"
+click node_node_pesticide "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/pesticide"
+click node_node_pesticide_record "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/pesticide_record"
+click node_node_famic "https://github.com/yasunorioi/rotation-planner/tree/main/rotation_planner/famic"
+click node_node_front_app "https://github.com/yasunorioi/rotation-planner/tree/main/frontend/app/src"
+click node_node_front_pages "https://github.com/yasunorioi/rotation-planner/tree/main/frontend/app/src/pages"
+click node_node_front_components "https://github.com/yasunorioi/rotation-planner/tree/main/frontend/app/src/components"
+click node_node_front_state "https://github.com/yasunorioi/rotation-planner/tree/main/frontend/app/src/store"
+click node_node_front_lib "https://github.com/yasunorioi/rotation-planner/tree/main/frontend/app/src/lib"
+click node_node_db "https://github.com/yasunorioi/rotation-planner/blob/main/db_schema.sql"
+click node_node_data "https://github.com/yasunorioi/rotation-planner/tree/main/data"
+click node_node_scripts "https://github.com/yasunorioi/rotation-planner/tree/main/scripts"
+click node_node_tests "https://github.com/yasunorioi/rotation-planner/tree/main/tests"
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_node_api_main,node_node_api_routers,node_node_api_deps toneBlue
+class node_node_common,node_node_field,node_node_optimizer,node_node_crop_history,node_node_pesticide,node_node_pesticide_record,node_node_famic toneAmber
+class node_node_front_app,node_node_front_pages,node_node_front_components,node_node_front_state,node_node_front_lib toneMint
+class node_node_db,node_node_data,node_node_scripts,node_node_tests toneRose
+```
+
 ## 主な機能
 
 | 機能 | 説明 |

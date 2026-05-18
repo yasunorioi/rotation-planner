@@ -71,7 +71,7 @@ export class RotationSolver {
     this.pinnedMap = new Map();
     for (const pin of pinnedAssignments) {
       console.log("[DEBUG-1274-PIN] pin=", pin, "keys=", Object.keys(pin), "year=", pin.year, "yearType=", typeof pin.year, "crop=", pin.crop, "cropType=", typeof pin.crop, "field_id=", pin.field_id, "fieldIdType=", typeof pin.field_id);
-      const fieldIdx = fields.findIndex((f) => f.id === pin.field_id);
+      const fieldIdx = fields.findIndex((f) => Number(f.fieldId) === pin.field_id);
       console.log("[DEBUG-1274-PIN] fieldIdx=", fieldIdx, "fields.length=", fields.length, "fields[0]?.id=", fields[0]?.id, "fields[0]?.idType=", typeof fields[0]?.id);
       if (fieldIdx >= 0) {
         const yearKey = /^\d{4}$/.test(pin.year) ? `R${parseInt(pin.year, 10) - 2018}` : pin.year;

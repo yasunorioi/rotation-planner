@@ -72,7 +72,8 @@ export class RotationSolver {
     for (const pin of pinnedAssignments) {
       const fieldIdx = fields.findIndex((f) => f.id === pin.field_id);
       if (fieldIdx >= 0) {
-        this.pinnedMap.set(`${fieldIdx},${pin.year}`, pin.crop);
+        const yearKey = /^\d{4}$/.test(pin.year) ? `R${parseInt(pin.year, 10) - 2018}` : pin.year;
+        this.pinnedMap.set(`${fieldIdx},${yearKey}`, pin.crop);
       }
     }
   }

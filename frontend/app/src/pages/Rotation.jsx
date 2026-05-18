@@ -544,9 +544,46 @@ export default function Rotation() {
           </div>
 
           {result.errors.length > 0 && (
-            <div className="warnings">
-              <h4>⚠️ 警告/違反</h4>
-              <ul>
+            <div
+              className="warnings"
+              role="alert"
+              aria-live="polite"
+              aria-atomic="true"
+              style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 100,
+                backgroundColor: '#fef3f2',
+                color: '#7f1d1d',
+                padding: '12px 16px',
+                borderRadius: '8px',
+                border: '2px solid #b91c1c',
+                marginBottom: '16px',
+                boxShadow: '0 2px 8px rgba(185, 28, 28, 0.15)',
+              }}
+            >
+              <h4 style={{ margin: 0, color: '#7f1d1d', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  aria-label={`違反件数 ${result.errors.length} 件`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '24px',
+                    height: '24px',
+                    background: '#b91c1c',
+                    color: '#ffffff',
+                    borderRadius: '12px',
+                    padding: '0 8px',
+                    fontSize: '0.9em',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {result.errors.length}
+                </span>
+                <span>⚠️ 警告/違反</span>
+              </h4>
+              <ul style={{ margin: '8px 0 0 0', paddingLeft: '24px', color: '#7f1d1d' }}>
                 {result.errors.map((e, i) => (
                   <li key={i}>{e}</li>
                 ))}

@@ -85,7 +85,8 @@ export default function Rotation() {
         const history = await fieldApi.getHistory(field.id);
         histories[field.id] = {};
         for (const h of history) {
-          histories[field.id][`R${h.year}`] = h.crop;
+          const reiwaYear = Number(h.year) - 2018;
+          histories[field.id][`R${reiwaYear}`] = h.crop;
         }
       } catch {
         histories[field.id] = {};

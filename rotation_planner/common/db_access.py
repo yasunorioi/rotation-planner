@@ -574,7 +574,7 @@ class PlanRepository:
         """
         with get_db() as conn:
             cursor = conn.execute("""
-                SELECT id, name, start_year, end_year, created_at, updated_at
+                SELECT id, user_id, name, start_year, end_year, created_at, updated_at
                 FROM rotation_plans
                 WHERE user_id = ?
                 ORDER BY updated_at DESC

@@ -78,7 +78,7 @@ def list_plans(current_user: Dict = Depends(get_current_user)):
 def create_plan(plan: PlanCreate, current_user: Dict = Depends(get_current_user)):
     plan_id = PlanRepository.create_plan(
         user_id=current_user["id"],
-        plan_data={
+        data={
             "name": plan.name,
             "start_year": plan.start_year,
             "end_year": plan.end_year,

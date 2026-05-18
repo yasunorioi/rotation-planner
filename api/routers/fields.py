@@ -570,6 +570,27 @@ def add_crop_history(field_id: int, history: CropHistoryCreate, current_user: Di
     if field["user_id"] != current_user["id"] and current_user["role"] not in ["admin", "ja_staff"]:
         raise HTTPException(status_code=403, detail="Access denied")
     history_id = CropHistoryRepository.add_history(field_id, history.year, history.crop)
+    # cmd_586 subtask_1259: 暗黙pin (crop_history POST と同時に pinned_assignments 自動書込)
+    # Q2=a 過去年 (year < 現在年度) は skip・crop_history のみ
+    _y = str(history.year).strip()
+    try:
+        _yn = 2018 + int(_y[1:]) if _y.upper().startswith("R") else int(_y)
+    except (ValueError, IndexError):
+        _yn = None
+    if _yn is not None and _yn >= datetime.now().year:
+        try:
+            from rotation_planner.common.db import get_db
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO pinned_assignments "
+                    "(user_id, field_id, year, crop, pinned_by, pinned_reason, is_active, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)",
+                    (field["user_id"], field_id, history.year, history.crop,
+                     current_user["id"], "implicit pin via crop_history POST")
+                )
+                conn.commit()
+        except Exception as _e:
+            logger.warning(f"暗黙pin書込失敗(crop_historyは成功): {_e}")
     return CropHistoryResponse(id=history_id, field_id=field_id, year=history.year, crop=history.crop)
 
 

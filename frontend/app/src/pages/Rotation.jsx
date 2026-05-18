@@ -179,6 +179,7 @@ export default function Rotation() {
 
     const startTime = performance.now();
 
+    console.log("[DEBUG-1275-FIELDS] solverFields.length=", solverFields.length, "solverFields[0]=", solverFields[0], "keys=", solverFields[0] ? Object.keys(solverFields[0]) : null);
     console.log("[DEBUG-1270] Rotation.jsx before solver pinnedAssignments=", pinnedAssignments, "length=", pinnedAssignments.length, "futureYearsList=", futureYearsList);
     const solver = new RotationSolver(
       solverFields,

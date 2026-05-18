@@ -4,7 +4,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useFieldStore } from '../store/fieldStore';
-import { fieldApi, constraintApi, planApi, cropApi, rotationApi } from '../lib/api';
+import { fieldApi, constraintApi, planApi, cropApi, rotationApi, pinnedApi } from '../lib/api';
 import { RotationSolver, createDefaultConstraints, generateResultTables } from '../lib/rotationSolver';
 import ConstraintEditor from '../components/ConstraintEditor';
 import { ErrorMessage } from '../components/ErrorMessage';
@@ -16,6 +16,7 @@ export default function Rotation() {
   const [fieldHistories, setFieldHistories] = useState({});
   const [crops, setCrops] = useState(DEFAULT_CROPS);
   const [constraints, setConstraints] = useState(null);
+  const [pinnedAssignments, setPinnedAssignments] = useState([]);  // cmd_586 subtask_1262
   const [futureYears, setFutureYears] = useState(4);
   const [result, setResult] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -49,7 +50,17 @@ export default function Rotation() {
     fetchFields();
     loadCrops();
     loadConstraints();
+    loadPinnedAssignments();
   }, [fetchFields]);
+
+  const loadPinnedAssignments = async () => {
+    try {
+      const data = await pinnedApi.list({ active_only: true });
+      setPinnedAssignments(Array.isArray(data) ? data : []);
+    } catch {
+      setPinnedAssignments([]);
+    }
+  };
 
   // 作付履歴読み込み
   useEffect(() => {
@@ -171,7 +182,8 @@ export default function Rotation() {
       pastYears,
       futureYearsList,
       crops,
-      solverConstraints
+      solverConstraints,
+      pinnedAssignments  // cmd_586 subtask_1262: pinned 引数追加
     );
 
     const { plan, score, errors } = solver.solve({ maxIterations: 2000 });

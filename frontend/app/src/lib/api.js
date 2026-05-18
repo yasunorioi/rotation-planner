@@ -644,4 +644,15 @@ export const inventoryApi = {
   },
 };
 
+// =============================================================================
+// Pinned Assignments (cmd_584/586)
+// =============================================================================
+
+export const pinnedApi = {
+  list: async (params = {}) => {
+    const res = await api.get('/api/pinned-assignments', { params });
+    return res.data;
+  },
+};
+
 export default api;

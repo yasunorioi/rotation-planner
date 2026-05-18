@@ -628,7 +628,7 @@ def optimize_rotation(req: RotationOptimizeRequest, current_user: Dict = Depends
         for f in req.fields:
             field_obj = Field(
                 field_id=str(f.get("field_id", f.get("fieldId", ""))),
-                field_code=f.get("field_code", f.get("fieldCode", "")),
+                name=f.get("field_code", f.get("fieldCode", "")),
                 area_ha=float(f.get("area_ha", f.get("areaHa", 0))),
                 district=f.get("district", ""),
                 history=f.get("history", {}),

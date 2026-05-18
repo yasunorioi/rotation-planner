@@ -385,7 +385,7 @@ export function generateResultTables(fields, pastYears, futureYears, plan, crops
       if (pastYears.includes(year)) {
         row[year] = field.history[year] || '';
       } else {
-        row[year] = plan[`${i},${year}`] || '';
+        row[year] = plan[`${i},${year}`] || field.history[year] || '';
       }
     }
     return row;
@@ -401,7 +401,7 @@ export function generateResultTables(fields, pastYears, futureYears, plan, crops
         if (pastYears.includes(year)) {
           c = fields[i].history[year];
         } else {
-          c = plan[`${i},${year}`];
+          c = plan[`${i},${year}`] || fields[i].history[year];
         }
         if (c === crop) {
           totalHa += fields[i].areaHa;

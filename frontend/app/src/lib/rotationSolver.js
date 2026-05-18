@@ -76,6 +76,7 @@ export class RotationSolver {
         this.pinnedMap.set(`${fieldIdx},${yearKey}`, pin.crop);
       }
     }
+    console.log("[DEBUG-1270] constructor pinnedAssignments.length=", pinnedAssignments.length, "pinnedMap.size=", this.pinnedMap.size, "entries=", [...this.pinnedMap.entries()].slice(0, 10));
   }
 
   getLastNCrops(fieldIdx, year, n, plan) {
@@ -267,11 +268,13 @@ export class RotationSolver {
   }
 
   generateInitialSolution() {
+    console.log("[DEBUG-1270] generateInitialSolution START pinnedMap.size=", this.pinnedMap.size, "entries=", [...this.pinnedMap.entries()]);
     const plan = {};
     // cmd_584 subtask_1255: pinned を plan に pre-fill (殿手動R9計画を最優先)
     for (const [key, crop] of this.pinnedMap) {
       plan[key] = crop;
     }
+    console.log("[DEBUG-1270] generateInitialSolution pre-fill done plan keys=", Object.keys(plan));
     for (const year of this.futureYears) {
       const fieldIndices = shuffle([...Array(this.fields.length).keys()]);
       for (const fieldIdx of fieldIndices) {
@@ -302,17 +305,20 @@ export class RotationSolver {
         plan[`${fieldIdx},${year}`] = bestCrop;
       }
     }
+    console.log("[DEBUG-1270] generateInitialSolution END plan sample=", JSON.stringify(plan).slice(0, 600));
     return plan;
   }
 
   localSearch(plan, maxIterations = 1000) {
     let currentPlan = { ...plan };
     let { score: currentScore } = this.evaluateSolution(currentPlan);
+    let _ls_skip_count = 0, _ls_accept_count = 0;
+    console.log("[DEBUG-1270] localSearch START pinnedMap.size=", this.pinnedMap.size, "plan sample=", JSON.stringify(currentPlan).slice(0, 600));
     for (let iter = 0; iter < maxIterations; iter++) {
       const fieldIdx = Math.floor(Math.random() * this.fields.length);
       const year = this.futureYears[Math.floor(Math.random() * this.futureYears.length)];
       const key = `${fieldIdx},${year}`;
-      if (this.pinnedMap.has(key)) continue;
+      if (this.pinnedMap.has(key)) { _ls_skip_count++; continue; }
       const validCrops = this.getValidCrops(fieldIdx, year, currentPlan);
       if (validCrops.length === 0) continue;
       const oldCrop = currentPlan[key];
@@ -331,14 +337,18 @@ export class RotationSolver {
       const { score: newScore } = this.evaluateSolution(currentPlan);
       if (newScore > currentScore) {
         currentScore = newScore;
+        _ls_accept_count++;
       } else {
         currentPlan[key] = oldCrop;
       }
     }
+    console.log("[DEBUG-1270] localSearch END skip_count=", _ls_skip_count, "accept_count=", _ls_accept_count, "plan sample=", JSON.stringify(currentPlan).slice(0, 600));
     return currentPlan;
   }
 
   ensureMinFields(plan) {
+    let _em_skip_count = 0, _em_overwrite_count = 0;
+    console.log("[DEBUG-1270] ensureMinFields START pinnedMap.size=", this.pinnedMap.size, "plan sample=", JSON.stringify(plan).slice(0, 600));
     for (const year of this.futureYears) {
       const stats = this.calculateYearStats(year, plan);
       for (const crop of this.crops) {
@@ -349,7 +359,7 @@ export class RotationSolver {
           let changed = false;
           for (let i = 0; i < this.fields.length; i++) {
             const key = `${i},${year}`;
-            if (this.pinnedMap.has(key)) continue;
+            if (this.pinnedMap.has(key)) { _em_skip_count++; continue; }
             const currentCrop = plan[key];
             if (currentCrop === crop) continue;
             if (!this.checkGapConstraint(i, year, crop, plan)) continue;
@@ -361,6 +371,7 @@ export class RotationSolver {
               if ((otherStats[currentCrop]?.fieldCount || 0) <= otherMin) continue;
             }
             plan[key] = crop;
+            _em_overwrite_count++;
             changed = true;
             currentCount += 1;
             break;
@@ -372,6 +383,7 @@ export class RotationSolver {
         }
       }
     }
+    console.log("[DEBUG-1270] ensureMinFields END skip_count=", _em_skip_count, "overwrite_count=", _em_overwrite_count, "plan sample=", JSON.stringify(plan).slice(0, 600));
     return plan;
   }
 

@@ -56,8 +56,10 @@ export default function Rotation() {
   const loadPinnedAssignments = async () => {
     try {
       const data = await pinnedApi.list({ active_only: true });
+      console.log("[DEBUG-1270] Rotation.jsx loadPinnedAssignments SUCCESS data=", data);
       setPinnedAssignments(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (e) {
+      console.log("[DEBUG-1270] Rotation.jsx loadPinnedAssignments FAIL error=", e && e.message);
       setPinnedAssignments([]);
     }
   };
@@ -177,6 +179,7 @@ export default function Rotation() {
 
     const startTime = performance.now();
 
+    console.log("[DEBUG-1270] Rotation.jsx before solver pinnedAssignments=", pinnedAssignments, "length=", pinnedAssignments.length, "futureYearsList=", futureYearsList);
     const solver = new RotationSolver(
       solverFields,
       pastYears,

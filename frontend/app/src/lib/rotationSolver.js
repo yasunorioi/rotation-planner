@@ -55,17 +55,26 @@ export function createDefaultConstraints() {
 // =============================================================================
 
 export class RotationSolver {
-  constructor(fields, pastYears, futureYears, crops, constraints) {
+  constructor(fields, pastYears, futureYears, crops, constraints, pinnedAssignments = []) {
     this.fields = fields;
     this.pastYears = pastYears;
     this.futureYears = futureYears;
     this.allYears = [...pastYears, ...futureYears];
     this.crops = crops;
     this.constraints = constraints;
+    this.pinnedAssignments = pinnedAssignments;
     this.errors = [];
     this.forbiddenSet = new Set(
       constraints.forbiddenTransitions.map(([from, to]) => `${from}->${to}`)
     );
+    // pinned lookup を事前構築 (cmd_584 subtask_1255 ソルバー組込み)
+    this.pinnedMap = new Map();
+    for (const pin of pinnedAssignments) {
+      const fieldIdx = fields.findIndex((f) => f.id === pin.field_id);
+      if (fieldIdx >= 0) {
+        this.pinnedMap.set(`${fieldIdx},${pin.year}`, pin.crop);
+      }
+    }
   }
 
   getLastNCrops(fieldIdx, year, n, plan) {
@@ -258,9 +267,15 @@ export class RotationSolver {
 
   generateInitialSolution() {
     const plan = {};
+    // cmd_584 subtask_1255: pinned を plan に pre-fill (殿手動R9計画を最優先)
+    for (const [key, crop] of this.pinnedMap) {
+      plan[key] = crop;
+    }
     for (const year of this.futureYears) {
       const fieldIndices = shuffle([...Array(this.fields.length).keys()]);
       for (const fieldIdx of fieldIndices) {
+        // pinned はスキップ (既に plan に格納済・cmd_584 subtask_1255)
+        if (this.pinnedMap.has(`${fieldIdx},${year}`)) continue;
         let validCrops = this.getValidCrops(fieldIdx, year, plan);
         if (validCrops.length === 0) {
           validCrops = [...this.crops];

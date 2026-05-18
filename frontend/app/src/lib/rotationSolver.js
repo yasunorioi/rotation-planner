@@ -312,6 +312,7 @@ export class RotationSolver {
       const fieldIdx = Math.floor(Math.random() * this.fields.length);
       const year = this.futureYears[Math.floor(Math.random() * this.futureYears.length)];
       const key = `${fieldIdx},${year}`;
+      if (this.pinnedMap.has(key)) continue;
       const validCrops = this.getValidCrops(fieldIdx, year, currentPlan);
       if (validCrops.length === 0) continue;
       const oldCrop = currentPlan[key];
@@ -348,6 +349,7 @@ export class RotationSolver {
           let changed = false;
           for (let i = 0; i < this.fields.length; i++) {
             const key = `${i},${year}`;
+            if (this.pinnedMap.has(key)) continue;
             const currentCrop = plan[key];
             if (currentCrop === crop) continue;
             if (!this.checkGapConstraint(i, year, crop, plan)) continue;

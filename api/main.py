@@ -86,6 +86,7 @@ from api.routers.plans import router as plans_router
 from api.routers.pesticides import router as pesticides_router
 from api.routers.gis import router as gis_router
 from api.routers.dashboard import router as dashboard_router
+from api.routers.pinned_assignments import router as pinned_router
 
 # =============================================================================
 # アプリケーション設定
@@ -162,6 +163,7 @@ app.include_router(plans_router)
 app.include_router(pesticides_router)
 app.include_router(gis_router)
 app.include_router(dashboard_router)
+app.include_router(pinned_router)
 
 
 # Plans/Constraints エンドポイントは api/routers/plans.py に移動済み
